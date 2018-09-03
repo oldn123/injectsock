@@ -5,15 +5,39 @@
 #include <Iphlpapi.h>
 #include <Assert.h>
 #include <process.h>
+#include <assert.h>
 #include "HookApi.h"
 #include <openssl/rand.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-
-
+#include <vector>
+#include <queue>
+#include <map>
+using namespace std;
 #include "../../eikasia.h"
-CHookApi_Jmp g_hj;
+#include "../../../rtmp/PacketOrderer.h"
 
+struct DataNode{
+	int nIdx;
+	int nSize;
+	char * pBuf;
+	DataNode * pNext;
+};
+
+struct DataFrame{
+	DataNode * pNode;
+	int nTotalSize;
+	int nLoop;
+	int nGetSize;
+	DataNode * pPopNode;
+};
+
+int g_nSleepStep = 200;
+int g_msgCnt = 0;
+CHookApi_Jmp g_hj;
+map<SOCKET, queue<DataFrame>> g_dataQueueMap;
+
+map<SOCKET, int> g_timerMap;
 
 typedef int (WINAPI *PCONNECT)(SOCKET s, const struct sockaddr *address, int namelen);
 typedef int (WINAPI *PGETHOSTBYNAME)(const char *name);
@@ -140,16 +164,235 @@ int WINAPI __stdcall MySend(SOCKET s, const char* buf, int len, int flags)
 	return SentBytes;
 }
 
+void ReleaseDf(DataFrame & df)
+{
+
+}
+
+void hextostr(char *ptr,unsigned char *buf,int len)
+{
+	if (len > 999)
+	{
+		len = 999;
+	}
+	for(int i = 0; i < len; i++)
+	{
+		sprintf(ptr, "%02x",buf[i]);
+		ptr += 2;
+	}
+}
+
+bool bNeedBreak0 = false;
+
 //===========================RECV===========================
 int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 {
-	g_hj.SetHookOff("recv");
-
-	int RecvedBytes = recv(s, (char*)buf, len, flags);
-
+	int RecvedBytes = 0;
+	g_hj.SetHookOff("recv");	
+	RecvedBytes = recv(s, (char*)buf, len, flags);
 	g_hj.SetHookOn("recv");
 
 	if(RecvedBytes == SOCKET_ERROR) return RecvedBytes;
+
+	if (bNeedBreak0)
+	{
+		if (RecvedBytes == 6)
+		{
+			char val[6] = {0};
+			if (memcmp(buf, val, 6) == 0)
+			{
+				bNeedBreak0 = false;
+				return -1;
+			}	
+		}
+	}
+
+	//变更时间戳
+	bool bVideoMsg = len >= 8 && GetRtmpPacketType((unsigned char*)buf) == RtmpPacket::Video;
+	if (bVideoMsg)
+	{
+		if (!g_timerMap.count(s))
+		{
+			g_timerMap[s] = 0;
+		}
+
+		if (g_timerMap[s] > 15 * 1000)
+		{
+			return RecvedBytes;
+		}
+
+		int ntime = (buf[1] << 16) | (buf[2] << 8) | buf[3];
+
+		ntime += g_nSleepStep;
+		Sleep(g_nSleepStep);
+		g_timerMap[s] += g_nSleepStep;
+
+		((char*)buf)[1] = (char)((ntime >> 16) & 0xff);
+		((char*)buf)[2] = (char)((ntime >> 8) & 0xff);
+		((char*)buf)[3] = (char)(ntime & 0xff);
+	}
+	else
+	{
+		bool bJson = ((buf[0] & 0xc0) >> 6) == 2 && buf[4] == '{';
+		if (bJson)
+		{
+			char * pfind = strstr((char*)&buf[4], "{\"pack_type\":4,");
+			if (pfind)
+			{
+				char soutput[150] = {0};
+				char sTrace[100] = {0};
+				int nval = *(int*)buf;
+				nval &= 0x3fffffff;
+				hextostr(sTrace, (unsigned char*)&nval, 4);
+
+				sprintf(soutput, ">>> 结论  %s\n", sTrace);
+				OutputDebugStringA(soutput);
+				memset((void*)&buf[0], 0, len);
+				bNeedBreak0 = true;
+				return -1;
+				return RecvedBytes;
+			}
+
+			pfind = strstr((char*)&buf[4], "{\"pack_type\":5,");
+			if (pfind)
+			{
+				char soutput[150] = {0};
+				char sTrace[100] = {0};
+				int nval = *(int*)buf;
+				nval &= 0x3fffffff;
+				hextostr(sTrace, (unsigned char*)&nval, 4);
+
+				sprintf(soutput, ">>> 已开局  %s\n", sTrace);
+				OutputDebugStringA(soutput);
+				memset((void*)&buf[0], 0, len);
+				bNeedBreak0 = true;
+				return -1;
+				return RecvedBytes;
+			}
+
+			char soutput[150] = {0};
+			strcat(soutput, ">>> ");
+			memcpy(&soutput[4], &buf[4], RecvedBytes - 4 > 140 ? 140 : RecvedBytes - 4);
+			strcat(soutput, "\n");
+			OutputDebugStringA(soutput);
+		}
+// 		if (!g_timerMap.count(s))
+// 		{
+// 			char soutput[150] = {0};
+// 			char sTrace[100] = {0};
+// 			hextostr(sTrace, (unsigned char*)buf, 50);
+// 
+// 			sprintf(soutput, ">>> %s\n", sTrace);
+// 			OutputDebugStringA(soutput);
+// 		}
+	}
+
+	return RecvedBytes;
+	
+	
+	map<SOCKET, queue<DataFrame>> & dqm = g_dataQueueMap;
+	queue<DataFrame> & dnQueue = dqm[s];
+
+	int nRecLen = RecvedBytes;
+	bool bNeedRecvData = false;
+	DataNode * _pdn = NULL;
+	if (dnQueue.size() > 0)
+	{
+		DataFrame & df = dnQueue.back();
+		if(df.nGetSize < df.nTotalSize)
+		{
+			df.nGetSize += nRecLen;
+			if (df.nGetSize > df.nTotalSize)
+			{
+				nRecLen -= df.nGetSize - df.nTotalSize;
+				assert(0);
+			}
+			_pdn = df.pNode;
+		}	
+	}
+
+	if (_pdn)
+	{
+		//补充数据节点
+		DataNode * pdn = NULL;
+		while(1)
+		{
+			if(_pdn)
+			{
+				pdn = _pdn;
+				_pdn = _pdn->pNext;
+			}
+			else
+			{
+				break;
+			}
+		}
+		pdn->pNext = new DataNode;
+		pdn->pNext->nIdx = g_msgCnt++;
+		pdn->pNext->nSize = nRecLen;
+		pdn->pNext->pBuf = new char[nRecLen];
+		memcpy(pdn->pNext->pBuf, buf, pdn->pNext->nSize);
+		pdn->pNext->pNext = NULL;	
+	}
+	else
+	{
+		bool bVideoMsg = len >= 8 && GetRtmpPacketType((unsigned char*)buf) == RtmpPacket::Video;
+		if (!bVideoMsg)
+		{
+			return RecvedBytes;
+		}
+		else
+		{
+			DataFrame df;
+			df.nLoop = 0;
+			df.pNode = new DataNode;
+			df.pPopNode = df.pNode;
+			df.nGetSize = nRecLen;
+
+			unsigned char totalExpected_byte0 = *(buf + 4);	
+			unsigned char totalExpected_byte1 = *(buf + 5);
+			unsigned char totalExpected_byte2 = *(buf + 6);
+
+			int totalExpected = (totalExpected_byte0 << 16) | (totalExpected_byte1 << 8) | totalExpected_byte2 + 8;
+			// add in extra chunk delimiters
+			totalExpected += totalExpected/128;
+
+			df.nTotalSize = totalExpected;
+
+
+			df.pNode->nIdx = g_msgCnt++;
+			df.pNode->nSize = nRecLen;
+			df.pNode->pBuf = new char[nRecLen];
+			memcpy(df.pNode->pBuf, buf, df.pNode->nSize);
+			df.pNode->pNext = NULL;
+
+			dnQueue.push(df);
+		}
+	}
+
+	//>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+	DataNode *pdn = NULL;
+	if (dnQueue.size() && g_msgCnt > 1)
+	{
+		DataFrame & df = dnQueue.front();
+		pdn = df.pPopNode;
+		df.pPopNode = df.pPopNode->pNext;
+		if (df.pPopNode == NULL)
+		{
+			df.pPopNode = df.pNode;
+			df.nLoop++;
+		}
+		memset((char*)buf, 0, len);
+		memcpy((char*)buf, pdn->pBuf, pdn->nSize);
+		RecvedBytes = pdn->nSize;
+
+		if (df.nLoop > 1)
+		{
+			ReleaseDf(df);
+			dnQueue.pop();
+		}
+	}
 
 	char stext[80] = {0};
 	sprintf(stext, "####! recv: %d\n", RecvedBytes);

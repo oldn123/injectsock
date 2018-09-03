@@ -55,7 +55,7 @@
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <AdditionalIncludeDirectories>D:\code\eikasia\Eikasia DLL\VC++\lib\openssl\include;..\apihook;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\code\injectsock\Injectsock\lib\openssl\include;..\apihook;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -89,6 +89,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\apihook\HookApi.cpp" />
+    <ClCompile Include="..\rtmp\PacketOrderer.cpp" />
+    <ClCompile Include="..\rtmp\RtmpPacketAggregator.cpp" />
     <ClCompile Include="..\src\attachs\process_attach.cpp">
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">CompileAsCpp</CompileAs>
     </ClCompile>
@@ -125,6 +127,13 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\rtmp\PacketOrderer.h" />
+    <ClInclude Include="..\rtmp\RtmpPacket.h" />
+    <ClInclude Include="..\rtmp\RtmpPacketAggregator.h" />
+    <ClInclude Include="..\rtmp\RtmpPacketTypeManaged.h" />
+    <ClInclude Include="..\rtmp\RtmpWatcherInterop.h" />
+    <ClInclude Include="..\rtmp\TcpDefinitions.h" />
+    <ClInclude Include="..\rtmp\TcpPacket.h" />
     <ClInclude Include="..\src\modules\md5calc\md5calc.h" />
     <ClInclude Include="..\src\modules\md5sum\md5.h" />
     <ClInclude Include="..\src\modules\md5sum\md5wrapper.h" />
