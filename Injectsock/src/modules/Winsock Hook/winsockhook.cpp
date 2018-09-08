@@ -7,12 +7,13 @@
 #include <process.h>
 #include <assert.h>
 #include "HookApi.h"
-#include <openssl/rand.h>
-#include <openssl/ssl.h>
-#include <openssl/err.h>
+//#include <openssl/rand.h>
+//#include <openssl/ssl.h>
+//#include <openssl/err.h>
 #include <vector>
 #include <queue>
 #include <map>
+#include <set>
 using namespace std;
 #include "../../eikasia.h"
 #include "../../../rtmp/PacketOrderer.h"
@@ -38,6 +39,7 @@ CHookApi_Jmp g_hj;
 map<SOCKET, queue<DataFrame>> g_dataQueueMap;
 
 map<SOCKET, int> g_timerMap;
+set<SOCKET> g_goodsocketSet;
 
 typedef int (WINAPI *PCONNECT)(SOCKET s, const struct sockaddr *address, int namelen);
 typedef int (WINAPI *PGETHOSTBYNAME)(const char *name);
@@ -99,6 +101,13 @@ int WINAPI MyClosesocket (SOCKET s) {
 	g_hj.SetHookOff("closesocket");
 	int nret = closesocket(s);
 	g_hj.SetHookOn("closesocket");
+	if (g_goodsocketSet.count(s))
+	{
+		char sout[100] = {0};
+		sprintf(sout, ">>> (0x%x) closesocket\n", s);
+		OutputDebugStringA(sout);
+		g_goodsocketSet.erase(s);
+	}
 	return nret;
 }
 /*
@@ -233,40 +242,51 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 	}
 	else
 	{
+		if (g_goodsocketSet.count(s))
+		{
+			char soutput[150] = {0};
+			sprintf(soutput, ">>> (0x%x) ret[%d]  ",s, RecvedBytes);
+			memcpy(&soutput[strlen(soutput)], &buf[4], RecvedBytes - 4 > 100 ? 100 : RecvedBytes - 4);
+			strcat(soutput, "\n");
+			OutputDebugStringA(soutput);
+		}
+
 		bool bJson = ((buf[0] & 0xc0) >> 6) == 2 && buf[4] == '{';
 		if (bJson)
 		{
 			char * pfind = strstr((char*)&buf[4], "{\"pack_type\":4,");
 			if (pfind)
 			{
+				g_goodsocketSet.insert(s);
 				char soutput[150] = {0};
 				char sTrace[100] = {0};
 				int nval = *(int*)buf;
 				nval &= 0x3fffffff;
 				hextostr(sTrace, (unsigned char*)&nval, 4);
 
-				sprintf(soutput, ">>> 结论  %s\n", sTrace);
+				sprintf(soutput, ">>> 结论(0x%x)  %s\n",s, sTrace);
 				OutputDebugStringA(soutput);
-				memset((void*)&buf[0], 0, len);
-				bNeedBreak0 = true;
-				return -1;
+// 				memset((void*)&buf[0], 0, len);
+// 				bNeedBreak0 = true;
+// 				return -1;
 				return RecvedBytes;
 			}
 
 			pfind = strstr((char*)&buf[4], "{\"pack_type\":5,");
 			if (pfind)
 			{
+				g_goodsocketSet.insert(s);
 				char soutput[150] = {0};
 				char sTrace[100] = {0};
 				int nval = *(int*)buf;
 				nval &= 0x3fffffff;
 				hextostr(sTrace, (unsigned char*)&nval, 4);
 
-				sprintf(soutput, ">>> 已开局  %s\n", sTrace);
+				sprintf(soutput, ">>> 已开局(0x%x)  %s\n",s, sTrace);
 				OutputDebugStringA(soutput);
-				memset((void*)&buf[0], 0, len);
-				bNeedBreak0 = true;
-				return -1;
+ 				memset((void*)&buf[0], 0, len);
+// 				bNeedBreak0 = true;
+ 				return 0;
 				return RecvedBytes;
 			}
 
