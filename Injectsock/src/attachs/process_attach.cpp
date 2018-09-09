@@ -3,7 +3,7 @@
 
 void ProcessAttach(void) {
 	//if ( IsExpired(1313798400) ) {
-		MessageBox(0,"This DLL has been expired","Error",MB_OK);
+		MessageBox(0,"成功","提示",MB_OK);
 	//	TerminateProcess(OpenProcess(PROCESS_ALL_ACCESS,0,GetCurrentProcessId()),0); // Close application
 	//}
 // 	#ifdef AntiWPE

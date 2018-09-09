@@ -18,6 +18,20 @@ using namespace std;
 #include "../../eikasia.h"
 #include "../../../rtmp/PacketOrderer.h"
 
+enum MsgType {
+	eNodef,
+	eJionRoom,
+	eBegin,
+	eResult
+};
+
+struct MsgInfo
+{
+	MsgType mt;
+	int nTotalLen;
+	int nRecvlen;
+};
+
 struct DataNode{
 	int nIdx;
 	int nSize;
@@ -38,8 +52,16 @@ int g_msgCnt = 0;
 CHookApi_Jmp g_hj;
 map<SOCKET, queue<DataFrame>> g_dataQueueMap;
 
-map<SOCKET, int> g_timerMap;
-set<SOCKET> g_goodsocketSet;
+std::map<SOCKET, int> g_timerMap;
+
+
+std::map<SOCKET, MsgInfo> g_msgTypeMap;
+std::map<SOCKET, pair<char*, int>> g_startMap;
+std::map<SOCKET, pair<char*, int>> g_endMap;
+DWORD g_dwStartTime = 0;
+DWORD g_dwEndTime = 0;
+DWORD g_dwStartDelay = 0;
+DWORD g_dwEndDelay = 0;
 
 typedef int (WINAPI *PCONNECT)(SOCKET s, const struct sockaddr *address, int namelen);
 typedef int (WINAPI *PGETHOSTBYNAME)(const char *name);
@@ -101,12 +123,10 @@ int WINAPI MyClosesocket (SOCKET s) {
 	g_hj.SetHookOff("closesocket");
 	int nret = closesocket(s);
 	g_hj.SetHookOn("closesocket");
-	if (g_goodsocketSet.count(s))
+
+	if (g_timerMap.count(s))
 	{
-		char sout[100] = {0};
-		sprintf(sout, ">>> (0x%x) closesocket\n", s);
-		OutputDebugStringA(sout);
-		g_goodsocketSet.erase(s);
+		g_timerMap.erase(s);
 	}
 	return nret;
 }
@@ -191,6 +211,74 @@ void hextostr(char *ptr,unsigned char *buf,int len)
 	}
 }
 
+MsgType GetMsgType(SOCKET s, char * pBuf, int nlen)
+{
+	MsgType mt = eNodef;
+	if (g_msgTypeMap.count(s))
+	{
+		mt = g_msgTypeMap.at(s).mt;
+		g_msgTypeMap[s].nRecvlen += nlen;
+		if (g_msgTypeMap[s].nRecvlen >= g_msgTypeMap[s].nTotalLen)
+		{
+			g_msgTypeMap.erase(s);
+		}
+		return mt;
+	}
+
+	int noffset = 4;
+	
+	do 
+	{
+		char strJionRoom[] = "{\"status\":1,\"pack_type\":1,";
+		if(memcmp(&pBuf[noffset],strJionRoom,strlen(strJionRoom)) == 0)
+		{
+			mt = eJionRoom;
+			break;
+		}
+
+		char strRes[] = "{\"pack_type\":4,\"data\":{";
+		if(memcmp((char*)&pBuf[noffset], strRes, strlen(strRes)) == 0)
+		{
+			mt = eResult;
+			break;
+		}
+
+		char strStart[] = "{\"pack_type\":5,\"data\":{";
+		if(memcmp((char*)&pBuf[noffset], strStart, strlen(strStart)) == 0)
+		{
+			mt = eBegin;
+			break;
+		}
+	} while (0);
+	
+	if (mt != eNodef)
+	{
+		int nMsgLen = (BYTE)pBuf[2];
+		nMsgLen <<= 8;
+		nMsgLen |= (BYTE)pBuf[3];
+
+		if (nlen < nMsgLen)
+		{
+			g_msgTypeMap[s].mt = mt;
+			g_msgTypeMap[s].nTotalLen = nMsgLen;
+			g_msgTypeMap[s].nRecvlen = nlen - 4;
+		}
+	}
+
+	return mt;
+}
+
+bool ReplaceBuf(char * pSrcBuf, char * strFind, char * strRep)
+{
+	char * pfind = strstr((char*)&pSrcBuf[0], strFind);
+	if (pfind)
+	{
+		memcpy(pfind, strRep, strlen(strRep));
+		return true;
+	}
+	return false;
+}
+
 bool bNeedBreak0 = false;
 
 //===========================RECV===========================
@@ -200,6 +288,38 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 	g_hj.SetHookOff("recv");	
 	RecvedBytes = recv(s, (char*)buf, len, flags);
 	g_hj.SetHookOn("recv");
+
+	if(RecvedBytes == SOCKET_ERROR)
+	{
+		if (g_timerMap.size())
+		{
+			if (g_startMap.count(s) && g_dwStartTime != 0 && g_dwStartDelay != 0)
+			{
+				if (GetTickCount() - g_dwStartTime >= g_dwStartDelay - g_dwStartDelay / 4)
+				{
+					int realret = g_startMap[s].second;
+					memcpy((void*)buf, g_startMap[s].first, realret);
+					delete [] g_startMap[s].first;
+					g_startMap.erase(s);
+					OutputDebugStringA(">>> 模拟---已开局....\n");
+					return realret;
+				}
+			}
+
+			if (g_endMap.count(s) && g_dwEndTime != 0 && g_dwEndDelay != 0)
+			{
+				if (GetTickCount() - g_dwEndTime >= g_dwEndDelay - g_dwEndDelay / 4)
+				{
+					int realret = g_endMap[s].second;
+					memcpy((void*)buf, g_endMap[s].first, realret);
+					delete [] g_endMap[s].first;
+					g_endMap.erase(s);
+					OutputDebugStringA(">>> 模拟---结论....\n");
+					return realret;
+				}
+			}
+		}
+	}
 
 	if(RecvedBytes == SOCKET_ERROR) return RecvedBytes;
 
@@ -225,7 +345,7 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 			g_timerMap[s] = 0;
 		}
 
-		if (g_timerMap[s] > 15 * 1000)
+		if (g_timerMap[s] >= 15 * 1000)
 		{
 			return RecvedBytes;
 		}
@@ -242,183 +362,176 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 	}
 	else
 	{
-		if (g_goodsocketSet.count(s))
+		MsgType mt = GetMsgType(s, (char*)buf, RecvedBytes);
+		switch(mt)
 		{
-			char soutput[150] = {0};
-			sprintf(soutput, ">>> (0x%x) ret[%d]  ",s, RecvedBytes);
-			memcpy(&soutput[strlen(soutput)], &buf[4], RecvedBytes - 4 > 100 ? 100 : RecvedBytes - 4);
-			strcat(soutput, "\n");
-			OutputDebugStringA(soutput);
+		case eBegin:
+			{
+				if (g_timerMap.size())
+				{
+					//存在视频流延时的情况
+					char * pdata = new char[RecvedBytes];
+					memcpy(pdata, buf, RecvedBytes);
+					g_startMap[s] = make_pair(pdata, RecvedBytes);
+					g_dwStartTime = GetTickCount();
+					g_dwStartDelay = g_timerMap.begin()->second;
+					memset((void*)&buf[0], 0, len);
+
+					OutputDebugStringA(">>> 屏蔽-已开局\n");
+
+					return 6;
+				}
+				return RecvedBytes;
+			}
+			break;
+		case eResult:
+			{
+				if (g_timerMap.size())
+				{
+					//存在视频流延时的情况
+					char * pdata = new char[RecvedBytes];
+					memcpy(pdata, buf, RecvedBytes);
+					g_endMap[s] = make_pair(pdata, RecvedBytes);
+					g_dwEndTime = GetTickCount();
+					g_dwEndDelay = g_timerMap.begin()->second;
+					memset((void*)&buf[0], 0, len);
+
+					OutputDebugStringA(">>> 屏蔽-结论\n");
+					return 6;
+				}
+				return RecvedBytes;
+			}
+			break;
+		case eJionRoom:
+			{
+
+			}
+			break;
 		}
+
 
 		bool bJson = ((buf[0] & 0xc0) >> 6) == 2 && buf[4] == '{';
 		if (bJson)
 		{
-			char * pfind = strstr((char*)&buf[4], "{\"pack_type\":4,");
-			if (pfind)
-			{
-				g_goodsocketSet.insert(s);
-				char soutput[150] = {0};
-				char sTrace[100] = {0};
-				int nval = *(int*)buf;
-				nval &= 0x3fffffff;
-				hextostr(sTrace, (unsigned char*)&nval, 4);
-
-				sprintf(soutput, ">>> 结论(0x%x)  %s\n",s, sTrace);
-				OutputDebugStringA(soutput);
-// 				memset((void*)&buf[0], 0, len);
-// 				bNeedBreak0 = true;
-// 				return -1;
-				return RecvedBytes;
-			}
-
-			pfind = strstr((char*)&buf[4], "{\"pack_type\":5,");
-			if (pfind)
-			{
-				g_goodsocketSet.insert(s);
-				char soutput[150] = {0};
-				char sTrace[100] = {0};
-				int nval = *(int*)buf;
-				nval &= 0x3fffffff;
-				hextostr(sTrace, (unsigned char*)&nval, 4);
-
-				sprintf(soutput, ">>> 已开局(0x%x)  %s\n",s, sTrace);
-				OutputDebugStringA(soutput);
- 				memset((void*)&buf[0], 0, len);
-// 				bNeedBreak0 = true;
- 				return 0;
-				return RecvedBytes;
-			}
-
 			char soutput[150] = {0};
 			strcat(soutput, ">>> ");
 			memcpy(&soutput[4], &buf[4], RecvedBytes - 4 > 140 ? 140 : RecvedBytes - 4);
 			strcat(soutput, "\n");
 			OutputDebugStringA(soutput);
 		}
-// 		if (!g_timerMap.count(s))
-// 		{
-// 			char soutput[150] = {0};
-// 			char sTrace[100] = {0};
-// 			hextostr(sTrace, (unsigned char*)buf, 50);
-// 
-// 			sprintf(soutput, ">>> %s\n", sTrace);
-// 			OutputDebugStringA(soutput);
-// 		}
 	}
 
 	return RecvedBytes;
 	
 	
-	map<SOCKET, queue<DataFrame>> & dqm = g_dataQueueMap;
-	queue<DataFrame> & dnQueue = dqm[s];
+// 	map<SOCKET, queue<DataFrame>> & dqm = g_dataQueueMap;
+// 	queue<DataFrame> & dnQueue = dqm[s];
+// 
+// 	int nRecLen = RecvedBytes;
+// 	bool bNeedRecvData = false;
+// 	DataNode * _pdn = NULL;
+// 	if (dnQueue.size() > 0)
+// 	{
+// 		DataFrame & df = dnQueue.back();
+// 		if(df.nGetSize < df.nTotalSize)
+// 		{
+// 			df.nGetSize += nRecLen;
+// 			if (df.nGetSize > df.nTotalSize)
+// 			{
+// 				nRecLen -= df.nGetSize - df.nTotalSize;
+// 				assert(0);
+// 			}
+// 			_pdn = df.pNode;
+// 		}	
+// 	}
+// 
+// 	if (_pdn)
+// 	{
+// 		//补充数据节点
+// 		DataNode * pdn = NULL;
+// 		while(1)
+// 		{
+// 			if(_pdn)
+// 			{
+// 				pdn = _pdn;
+// 				_pdn = _pdn->pNext;
+// 			}
+// 			else
+// 			{
+// 				break;
+// 			}
+// 		}
+// 		pdn->pNext = new DataNode;
+// 		pdn->pNext->nIdx = g_msgCnt++;
+// 		pdn->pNext->nSize = nRecLen;
+// 		pdn->pNext->pBuf = new char[nRecLen];
+// 		memcpy(pdn->pNext->pBuf, buf, pdn->pNext->nSize);
+// 		pdn->pNext->pNext = NULL;	
+// 	}
+// 	else
+// 	{
+// 		bool bVideoMsg = len >= 8 && GetRtmpPacketType((unsigned char*)buf) == RtmpPacket::Video;
+// 		if (!bVideoMsg)
+// 		{
+// 			return RecvedBytes;
+// 		}
+// 		else
+// 		{
+// 			DataFrame df;
+// 			df.nLoop = 0;
+// 			df.pNode = new DataNode;
+// 			df.pPopNode = df.pNode;
+// 			df.nGetSize = nRecLen;
+// 
+// 			unsigned char totalExpected_byte0 = *(buf + 4);	
+// 			unsigned char totalExpected_byte1 = *(buf + 5);
+// 			unsigned char totalExpected_byte2 = *(buf + 6);
+// 
+// 			int totalExpected = (totalExpected_byte0 << 16) | (totalExpected_byte1 << 8) | totalExpected_byte2 + 8;
+// 			// add in extra chunk delimiters
+// 			totalExpected += totalExpected/128;
+// 
+// 			df.nTotalSize = totalExpected;
+// 
+// 
+// 			df.pNode->nIdx = g_msgCnt++;
+// 			df.pNode->nSize = nRecLen;
+// 			df.pNode->pBuf = new char[nRecLen];
+// 			memcpy(df.pNode->pBuf, buf, df.pNode->nSize);
+// 			df.pNode->pNext = NULL;
+// 
+// 			dnQueue.push(df);
+// 		}
+// 	}
+// 
+// 	//>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+// 
+// 	DataNode *pdn = NULL;
+// 	if (dnQueue.size() && g_msgCnt > 1)
+// 	{
+// 		DataFrame & df = dnQueue.front();
+// 		pdn = df.pPopNode;
+// 		df.pPopNode = df.pPopNode->pNext;
+// 		if (df.pPopNode == NULL)
+// 		{
+// 			df.pPopNode = df.pNode;
+// 			df.nLoop++;
+// 		}
+// 		memset((char*)buf, 0, len);
+// 		memcpy((char*)buf, pdn->pBuf, pdn->nSize);
+// 		RecvedBytes = pdn->nSize;
+// 
+// 		if (df.nLoop > 1)
+// 		{
+// 			ReleaseDf(df);
+// 			dnQueue.pop();
+// 		}
+// 	}
+// 
+// 	char stext[80] = {0};
+// 	sprintf(stext, "####! recv: %d\n", RecvedBytes);
+// 	OutputDebugStringA(stext);
 
-	int nRecLen = RecvedBytes;
-	bool bNeedRecvData = false;
-	DataNode * _pdn = NULL;
-	if (dnQueue.size() > 0)
-	{
-		DataFrame & df = dnQueue.back();
-		if(df.nGetSize < df.nTotalSize)
-		{
-			df.nGetSize += nRecLen;
-			if (df.nGetSize > df.nTotalSize)
-			{
-				nRecLen -= df.nGetSize - df.nTotalSize;
-				assert(0);
-			}
-			_pdn = df.pNode;
-		}	
-	}
-
-	if (_pdn)
-	{
-		//补充数据节点
-		DataNode * pdn = NULL;
-		while(1)
-		{
-			if(_pdn)
-			{
-				pdn = _pdn;
-				_pdn = _pdn->pNext;
-			}
-			else
-			{
-				break;
-			}
-		}
-		pdn->pNext = new DataNode;
-		pdn->pNext->nIdx = g_msgCnt++;
-		pdn->pNext->nSize = nRecLen;
-		pdn->pNext->pBuf = new char[nRecLen];
-		memcpy(pdn->pNext->pBuf, buf, pdn->pNext->nSize);
-		pdn->pNext->pNext = NULL;	
-	}
-	else
-	{
-		bool bVideoMsg = len >= 8 && GetRtmpPacketType((unsigned char*)buf) == RtmpPacket::Video;
-		if (!bVideoMsg)
-		{
-			return RecvedBytes;
-		}
-		else
-		{
-			DataFrame df;
-			df.nLoop = 0;
-			df.pNode = new DataNode;
-			df.pPopNode = df.pNode;
-			df.nGetSize = nRecLen;
-
-			unsigned char totalExpected_byte0 = *(buf + 4);	
-			unsigned char totalExpected_byte1 = *(buf + 5);
-			unsigned char totalExpected_byte2 = *(buf + 6);
-
-			int totalExpected = (totalExpected_byte0 << 16) | (totalExpected_byte1 << 8) | totalExpected_byte2 + 8;
-			// add in extra chunk delimiters
-			totalExpected += totalExpected/128;
-
-			df.nTotalSize = totalExpected;
-
-
-			df.pNode->nIdx = g_msgCnt++;
-			df.pNode->nSize = nRecLen;
-			df.pNode->pBuf = new char[nRecLen];
-			memcpy(df.pNode->pBuf, buf, df.pNode->nSize);
-			df.pNode->pNext = NULL;
-
-			dnQueue.push(df);
-		}
-	}
-
-	//>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-	DataNode *pdn = NULL;
-	if (dnQueue.size() && g_msgCnt > 1)
-	{
-		DataFrame & df = dnQueue.front();
-		pdn = df.pPopNode;
-		df.pPopNode = df.pPopNode->pNext;
-		if (df.pPopNode == NULL)
-		{
-			df.pPopNode = df.pNode;
-			df.nLoop++;
-		}
-		memset((char*)buf, 0, len);
-		memcpy((char*)buf, pdn->pBuf, pdn->nSize);
-		RecvedBytes = pdn->nSize;
-
-		if (df.nLoop > 1)
-		{
-			ReleaseDf(df);
-			dnQueue.pop();
-		}
-	}
-
-	char stext[80] = {0};
-	sprintf(stext, "####! recv: %d\n", RecvedBytes);
-	OutputDebugStringA(stext);
-
-	//eikasia_process_recv(s, buf, &RecvedBytes, flags); // Process the recived buffer
 	return RecvedBytes;
 }
 
