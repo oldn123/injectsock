@@ -15,11 +15,11 @@ extern "C" __declspec (dllexport) BOOL APIENTRY DllMain(HINSTANCE hInst, DWORD r
 	switch(reason)
 	{					 
 		case DLL_PROCESS_ATTACH:
-				ProcessAttach();
+				ProcessAttach(hInst);
 			break;
 				
  		case DLL_PROCESS_DETACH:
-			//#include "attachs/process_detach.cpp"
+			ProcessDetch();
 			break;
 			
 			

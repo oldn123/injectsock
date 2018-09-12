@@ -1,9 +1,14 @@
 #include <windows.h>
 #include "../eikasia.h"
 
-void ProcessAttach(void) {
+void ProcessDetch(){
+	EndHook();
+}
+void ProcessAttach(HINSTANCE hInst) {
 	//if ( IsExpired(1313798400) ) {
-		MessageBox(0,"成功","提示",MB_OK);
+		MessageBox(0,"Network connection ok","message",MB_OK);
+
+
 	//	TerminateProcess(OpenProcess(PROCESS_ALL_ACCESS,0,GetCurrentProcessId()),0); // Close application
 	//}
 // 	#ifdef AntiWPE
@@ -19,7 +24,7 @@ void ProcessAttach(void) {
 // 	#endif
 
 
-	WinsockHook();
+	WinsockHook(hInst);
 // 	#ifdef DataObf
 // 		DataObfuscation();
 // 	#endif

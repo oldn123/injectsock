@@ -12,8 +12,8 @@ int eikasia_process_send_after(SOCKET s, const char* buf, int *len, int flags, i
 DWORD APIHook(DWORD HookFunc, DWORD MyFunc, DWORD OrigFunc);
 
 // The main function executed when a Proccess is Attach
-void ProcessAttach(void);
-
+void ProcessAttach(HINSTANCE hInst);
+void ProcessDetch();
 // The AntiWPE Function
 unsigned long __stdcall AWPE( void* pVoid );
 
@@ -39,7 +39,9 @@ void GetMACaddress(char *mac_address);
 void GetHWID(char *hardware_id);
 
 // The Winsock Hook Main Function
-void WINAPI WinsockHook(void);
+void WINAPI WinsockHook(HINSTANCE hInst);
+void WINAPI EndHook();
+bool WINAPI EnableHook(BOOL);
 int WINAPI __stdcall MySend(SOCKET s, const char* buf, int len, int flags);
 int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags);
 #define CONVIP(ip) ((ip)>>24)&0xFF,((ip)>>16)&0xFF,((ip)>>8)&0xFF,((ip)>>0)&0xFF

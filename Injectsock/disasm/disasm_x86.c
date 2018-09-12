@@ -1628,7 +1628,7 @@ HasSpecialExtension:
 	memcpy(&X86Instruction->Opcode, X86Opcode, sizeof(X86_OPCODE));
 	Instruction->Groups |= X86_GET_CATEGORY(X86Opcode);
 	assert(Instruction->Groups);
-	Instruction->Type |= X86_GET_TYPE(X86Opcode);
+	Instruction->Type = (INSTRUCTION_TYPE)((int)Instruction->Type | X86_GET_TYPE(X86Opcode));
 	assert((U32)Instruction->Type >= Instruction->Groups);
 	Instruction->OperandCount = X86_OPERAND_COUNT(X86Opcode);
 
@@ -3443,7 +3443,7 @@ INTERNAL U8 *SetOperands(INSTRUCTION *Instruction, U8 *Address, U32 Flags)
 				}
 				X86_SET_ADDR();
 				X86Instruction->Scale = 1;
-				X86Instruction->BaseRegister = Operand->Register;
+				X86Instruction->BaseRegister = (X86_REGISTER)Operand->Register;
 				X86Instruction->HasBaseRegister = TRUE;
 				X86Instruction->IndexRegister = X86_REG_AL;
 				X86Instruction->HasIndexRegister = TRUE;
@@ -3572,7 +3572,7 @@ INTERNAL U8 *SetOperands(INSTRUCTION *Instruction, U8 *Address, U32 Flags)
 				SANITY_CHECK_SEGMENT_OVERRIDE();
 				X86Instruction->HasSegmentOverridePrefix = FALSE;
 				X86Instruction->Segment = SEG_CS;
-				X86Instruction->BaseRegister = Operand->Register;
+				X86Instruction->BaseRegister = (X86_REGISTER)Operand->Register;
 				X86Instruction->HasBaseRegister = TRUE;
 				assert(Instruction->OperandCount == 1);
 				//DISASM_OUTPUT(("[SetOperand] AMODE_J (branch with relative offset)\n"));
@@ -3630,11 +3630,11 @@ INTERNAL U8 *SetOperands(INSTRUCTION *Instruction, U8 *Address, U32 Flags)
 				switch (Operand->Length)
 				{
 					case 6:
-						X86Instruction->Segment = *((U16 *)Address); INSTR_INC(2);
+						X86Instruction->Segment = (X86_SEGMENT)*((U16 *)Address); INSTR_INC(2);
 						X86Instruction->Displacement = (S64)*((S32 *)Address); INSTR_INC(4);
 						break;
 					case 4:
-						X86Instruction->Segment = *((U16 *)Address); INSTR_INC(2);
+						X86Instruction->Segment = (X86_SEGMENT)*((U16 *)Address); INSTR_INC(2);
 						X86Instruction->Displacement = (S64)*((S16 *)Address); INSTR_INC(2);
 						break;
 					default:
@@ -3665,7 +3665,7 @@ INTERNAL U8 *SetOperands(INSTRUCTION *Instruction, U8 *Address, U32 Flags)
 					default: assert(0); return NULL;
 				}
 
-				X86Instruction->BaseRegister = Operand->Register;
+				X86Instruction->BaseRegister = (X86_REGISTER)Operand->Register;
 				X86Instruction->HasBaseRegister = TRUE;
 				X86_SET_ADDR();
 				if (!X86Instruction->HasSegmentOverridePrefix) X86Instruction->Segment = SEG_DS;
@@ -3691,7 +3691,7 @@ INTERNAL U8 *SetOperands(INSTRUCTION *Instruction, U8 *Address, U32 Flags)
 					default: assert(0); return NULL;
 				}
 
-				X86Instruction->BaseRegister = Operand->Register;
+				X86Instruction->BaseRegister = (X86_REGISTER)Operand->Register;
 				X86Instruction->HasBaseRegister = TRUE;
 				X86_SET_ADDR();
 				if (X86Instruction->HasSegmentOverridePrefix)
@@ -4291,7 +4291,7 @@ INTERNAL U8 *SetModRM32(INSTRUCTION *Instruction, U8 *Address, INSTRUCTION_OPERA
 				case 2: Operand->Register = X86_REG_IP; break;
 				default: assert(0); return NULL;
 			}
-			X86Instruction->BaseRegister = Operand->Register;
+			X86Instruction->BaseRegister = (X86_REGISTER)Operand->Register;
 			X86Instruction->HasBaseRegister = TRUE;
 			X86Instruction->Relative = TRUE;
 			Operand->Flags |= OP_IPREL | OP_SIGNED | OP_REG;
@@ -4398,7 +4398,7 @@ INTERNAL U8 *SetModRM32(INSTRUCTION *Instruction, U8 *Address, INSTRUCTION_OPERA
 			case 4: Operand->Register = X86_32BIT_OFFSET + rex_modrm.rm; CHECK_AMD64_REG(); break;
 			default: assert(0); return NULL;
 		}
-		X86Instruction->BaseRegister = Operand->Register;
+		X86Instruction->BaseRegister = (X86_REGISTER)Operand->Register;
 		X86Instruction->HasBaseRegister = TRUE;
 		Operand->Flags |= OP_ADDRESS | OP_REG;
 		X86_SET_SEG(rex_modrm.rm);
@@ -4484,7 +4484,7 @@ INTERNAL U8 *SetSIB(INSTRUCTION *Instruction, U8 *Address, INSTRUCTION_OPERAND *
 					Operand->Register = AMD64_REG_R13;
 				}
 
-				X86Instruction->BaseRegister = Operand->Register;
+				X86Instruction->BaseRegister = (X86_REGISTER)Operand->Register;
 				X86Instruction->HasBaseRegister = TRUE;
 				Operand->Flags |= OP_REG;
 				INSTR_INC(1);
@@ -4511,7 +4511,7 @@ INTERNAL U8 *SetSIB(INSTRUCTION *Instruction, U8 *Address, INSTRUCTION_OPERAND *
 					Operand->Flags |= OP_GLOBAL;
 					X86Instruction->HasFullDisplacement = TRUE;
 				}
-				X86Instruction->BaseRegister = Operand->Register;
+				X86Instruction->BaseRegister = (X86_REGISTER)Operand->Register;
 				X86Instruction->HasBaseRegister = TRUE;
 				Operand->Flags |= OP_REG;
 				INSTR_INC(4);
@@ -4526,7 +4526,7 @@ INTERNAL U8 *SetSIB(INSTRUCTION *Instruction, U8 *Address, INSTRUCTION_OPERAND *
 			case 4: Operand->Register = X86_32BIT_OFFSET + rex_sib.base; CHECK_AMD64_REG(); break;
 			default: assert(0); return NULL;
 		}
-		X86Instruction->BaseRegister = Operand->Register;
+		X86Instruction->BaseRegister = (X86_REGISTER)Operand->Register;
 		X86Instruction->HasBaseRegister = TRUE;
 		X86_SET_SEG(rex_sib.base);
 		Operand->Flags |= OP_REG;
@@ -4537,10 +4537,10 @@ INTERNAL U8 *SetSIB(INSTRUCTION *Instruction, U8 *Address, INSTRUCTION_OPERAND *
 		switch (X86Instruction->AddressSize)
 		{
 			case 8:
-				X86Instruction->IndexRegister = AMD64_64BIT_OFFSET + rex_sib.index;
+				X86Instruction->IndexRegister = (X86_REGISTER)(AMD64_64BIT_OFFSET + rex_sib.index);
 				break;
 			case 4:
-				X86Instruction->IndexRegister = X86_32BIT_OFFSET + rex_sib.index;
+				X86Instruction->IndexRegister = (X86_REGISTER)(X86_32BIT_OFFSET + rex_sib.index);
 				break;
 			default:
 				fflush(stdout);

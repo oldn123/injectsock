@@ -68,7 +68,7 @@ BYTE *HexToBinary(char *Input, DWORD InputLength, DWORD *OutputLength)
 			goto abort;
 		}
 
-		ByteString = malloc(ByteCount+1);
+		ByteString = (BYTE*)malloc(ByteCount+1);
 		if (!ByteString)
 		{
 			//fprintf(stderr, "ERROR: failed to allocate %lu bytes\n", ByteCount);
@@ -116,7 +116,7 @@ BYTE *HexToBinary(char *Input, DWORD InputLength, DWORD *OutputLength)
 			goto abort;
 		}
 
-		ByteString = malloc(ByteCount+1);
+		ByteString = (BYTE*)malloc(ByteCount+1);
 		if (!ByteString)
 		{
 			//fprintf(stderr, "ERROR: failed to allocate %lu bytes\n", ByteCount);
@@ -157,7 +157,7 @@ BYTE *HexToBinary(char *Input, DWORD InputLength, DWORD *OutputLength)
 			goto abort;
 		}
 
-		ByteString = malloc(ByteCount+1);
+		ByteString = (BYTE*)malloc(ByteCount+1);
 		if (!ByteString)
 		{
 			//fprintf(stderr, "ERROR: failed to allocate %lu bytes\n", ByteCount);

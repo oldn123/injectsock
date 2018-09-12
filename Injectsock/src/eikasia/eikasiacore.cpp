@@ -1,8 +1,6 @@
 #include <windows.h>
 #include <stdio.h>
 
-#include "HookApi.h"
-
 #include "../eikasia.h"
 
 DWORD APIHook(DWORD HookFunc, DWORD MyFunc, DWORD OrigFunc)

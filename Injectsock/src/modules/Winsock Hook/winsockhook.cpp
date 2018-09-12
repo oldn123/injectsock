@@ -1,4 +1,4 @@
-#include <stdio.h>
+ï»¿#include <stdio.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -18,6 +18,7 @@
 using namespace std;
 #include "../../eikasia.h"
 #include "../../../rtmp/PacketOrderer.h"
+
 
 enum MsgType {
 	eNodef,
@@ -63,6 +64,11 @@ DWORD g_dwStartTime = 0;
 DWORD g_dwEndTime = 0;
 DWORD g_dwStartDelay = 0;
 DWORD g_dwEndDelay = 0;
+#define _TestMode
+
+#ifdef _TestMode
+DWORD g_dwTestTick = 0;
+#endif
 
 typedef int (WINAPI *PCONNECT)(SOCKET s, const struct sockaddr *address, int namelen);
 typedef int (WINAPI *PGETHOSTBYNAME)(const char *name);
@@ -281,7 +287,6 @@ bool ReplaceBuf(char * pSrcBuf, char * strFind, char * strRep)
 	return false;
 }
 
-bool bNeedBreak0 = false;
 
 //===========================RECV===========================
 int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
@@ -303,7 +308,7 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 					memcpy((void*)buf, g_startMap[s].first, realret);
 					delete [] g_startMap[s].first;
 					g_startMap.erase(s);
-					OutputDebugStringA(">>> Ä£Äâ---ÒÑ¿ª¾Ö....\n");
+					OutputDebugStringA(">>> æ¨¡æ‹Ÿ---å·²å¼€å±€....\n");
 					return realret;
 				}
 			}
@@ -316,7 +321,7 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 					memcpy((void*)buf, g_endMap[s].first, realret);
 					delete [] g_endMap[s].first;
 					g_endMap.erase(s);
-					OutputDebugStringA(">>> Ä£Äâ---½áÂÛ....\n");
+					OutputDebugStringA(">>> æ¨¡æ‹Ÿ---ç»“è®º....\n");
 					return realret;
 				}
 			}
@@ -325,20 +330,7 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 
 	if(RecvedBytes == SOCKET_ERROR) return RecvedBytes;
 
-	if (bNeedBreak0)
-	{
-		if (RecvedBytes == 6)
-		{
-			char val[6] = {0};
-			if (memcmp(buf, val, 6) == 0)
-			{
-				bNeedBreak0 = false;
-				return -1;
-			}	
-		}
-	}
-
-	//±ä¸üÊ±¼ä´Á
+	//å˜æ›´æ—¶é—´æˆ³
 	bool bVideoMsg = len >= 8 && GetRtmpPacketType((unsigned char*)buf) == RtmpPacket::Video;
 	if (bVideoMsg)
 	{
@@ -371,7 +363,7 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 			{
 				if (g_timerMap.size())
 				{
-					//´æÔÚÊÓÆµÁ÷ÑÓÊ±µÄÇé¿ö
+					//å­˜åœ¨è§†é¢‘æµå»¶æ—¶çš„æƒ…å†µ
 					char * pdata = new char[RecvedBytes];
 					memcpy(pdata, buf, RecvedBytes);
 					g_startMap[s] = make_pair(pdata, RecvedBytes);
@@ -379,7 +371,7 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 					g_dwStartDelay = g_timerMap.begin()->second;
 					memset((void*)&buf[0], 0, len);
 
-					OutputDebugStringA(">>> ÆÁ±Î-ÒÑ¿ª¾Ö\n");
+					OutputDebugStringA(">>> å±è”½-å·²å¼€å±€\n");
 
 					return 6;
 				}
@@ -390,7 +382,7 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 			{
 				if (g_timerMap.size())
 				{
-					//´æÔÚÊÓÆµÁ÷ÑÓÊ±µÄÇé¿ö
+					//å­˜åœ¨è§†é¢‘æµå»¶æ—¶çš„æƒ…å†µ
 					char * pdata = new char[RecvedBytes];
 					memcpy(pdata, buf, RecvedBytes);
 					g_endMap[s] = make_pair(pdata, RecvedBytes);
@@ -398,7 +390,7 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 					g_dwEndDelay = g_timerMap.begin()->second;
 					memset((void*)&buf[0], 0, len);
 
-					OutputDebugStringA(">>> ÆÁ±Î-½áÂÛ\n");
+					OutputDebugStringA(">>> å±è”½-ç»“è®º\n");
 					return 6;
 				}
 				return RecvedBytes;
@@ -449,7 +441,7 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 // 
 // 	if (_pdn)
 // 	{
-// 		//²¹³äÊý¾Ý½Úµã
+// 		//è¡¥å……æ•°æ®èŠ‚ç‚¹
 // 		DataNode * pdn = NULL;
 // 		while(1)
 // 		{
@@ -592,7 +584,167 @@ int WINAPI __stdcall MySendTo(SOCKET s, const char *buf, int len, int flags, con
 	return OrigSendTo(s, buf, len, flags, to, tolen);
 }
 
-void WINAPI WinsockHook(void)
+#ifdef _TestMode
+unsigned __stdcall ThreadStaticEntryPoint(void*)
+{
+	do 
+	{	
+		if (g_dwTestTick == 0)
+		{
+			g_dwTestTick = GetTickCount();
+		}
+		else
+		{
+			if(GetTickCount() - g_dwTestTick > 1000 * 60)
+			{
+				g_dwTestTick = GetTickCount();
+				HWND h = FindWindow(NULL, "ç»´åŠ æ–¯ - Google Chrome");
+			
+			//	DialogBox(NULL, "IDD_DIALOG1",h,NULL);
+				MessageBox(h, "ç»´åŠ æ–¯å¤–æŒ‚æµ‹è¯•ç¨‹åº\n", "ç»´åŠ æ–¯å¤–æŒ‚æµ‹è¯•ç¨‹åº", 0);
+			}
+		}
+		Sleep(1000*60);
+	} while (true);
+	return 1;//Â theÂ threadÂ exitÂ code
+}
+#endif
+
+
+HWND g_hMsgWnd = 0;
+
+//çª—å£å¤„ç†å‡½æ•°
+
+LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+	switch (uMsg)
+	{
+	case WM_USER+100:
+		{
+			char stext[100] = {0};
+			sprintf(stext, ">>> %d--%d\n", wParam, lParam);
+			OutputDebugStringA(stext);
+			OutputDebugStringA(">>> hotkey 1");
+			if (wParam == 0)
+			{
+				OutputDebugStringA(">>> hotkey 2");
+				EnableHook(TRUE);
+			}
+			else if (wParam == 1)
+			{
+				OutputDebugStringA(">>> hotkey 3");
+				EnableHook(FALSE);
+			}
+			OutputDebugStringA(">>> hotkey 4");
+		}
+		break;
+	case WM_DESTROY:
+
+	//	PostQuitMessage(0);//å¯ä»¥ä½¿GetMessageè¿”å›ž0
+		break;
+	default:
+		break;
+	}
+
+	return DefWindowProc(hWnd, uMsg, wParam, lParam);
+
+}
+
+
+bool DoCreateWnd(HINSTANCE hInst)
+{
+	//æ³¨å†Œçª—å£ç±»
+
+	WNDCLASSEX wce = { 0 };
+	wce.cbSize = sizeof(wce);
+	wce.cbClsExtra = 0;
+	wce.cbWndExtra = 0;
+	wce.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+	wce.hCursor = NULL;
+	wce.hIcon = NULL;
+	wce.hIconSm = NULL;
+	wce.hInstance = hInst;
+	wce.lpfnWndProc = WndProc;
+	wce.lpszClassName = "EikMsgWnd";
+	wce.lpszMenuName = NULL;
+	wce.style = CS_HREDRAW | CS_VREDRAW;
+	ATOM nAtom = RegisterClassEx(&wce);
+	if (!nAtom )
+	{
+		return false;
+	}
+
+	g_hMsgWnd = CreateWindowEx(0, "EikMsgWnd", "", WS_POPUPWINDOW, 0, 0, 0, 0, NULL, NULL, hInst, NULL);
+	if (!g_hMsgWnd)
+	{
+		return false;
+	}
+
+
+	HWND hDest = FindWindow("EikMsgWndA",NULL);
+	if (hDest)
+	{
+		char sbuf[100] = {0};
+
+		OutputDebugStringA(">>> EikMsgWndA found");
+		COPYDATASTRUCT copyData = { 0 };
+		copyData.lpData = 0;
+		copyData.cbData = 0;
+		copyData.dwData = (DWORD)hDest;
+		LRESULT lr = SendMessage(hDest, WM_COPYDATA, (WPARAM)hDest, (LPARAM)&copyData);
+		sprintf(sbuf, ">>> 0x%x, %x, %d", hDest, lr, GetLastError());
+		OutputDebugStringA(sbuf);
+	}
+	else
+	{
+		OutputDebugStringA(">>> EikMsgWndA not found");
+	}
+	
+	return true;
+}
+
+void WINAPI EndHook()
+{
+	if (g_hMsgWnd)
+	{
+		DestroyWindow(g_hMsgWnd);
+		g_hMsgWnd = NULL;
+	}
+
+	EnableHook(FALSE);
+}
+
+bool WINAPI EnableHook(BOOL bHook)
+{
+	int n = 0;
+	if (bHook)
+	{
+		if (Mhook_SetHook((PVOID*)&OrigRecv, MyRecv)) {		
+			n++;
+		}
+
+		if (Mhook_SetHook((PVOID*)&OrigClosesocket, MyClosesocket)) {		
+			n++;
+		}
+	}
+	else
+	{
+		if(Mhook_Unhook((PVOID*)&OrigRecv))
+		{
+			n++;
+		}
+
+		if (Mhook_Unhook((PVOID*)&OrigClosesocket))
+		{
+			n++;
+		}
+	}
+
+	return n == 2;
+}
+
+
+void WINAPI WinsockHook(HINSTANCE hInst)
 {
 	//WSADATA wsaData;
 	//char msgbuf[255];
@@ -604,7 +756,14 @@ void WINAPI WinsockHook(void)
 //	fputc(0x0d, fp);
 //	fputc(0x0a, fp);
 //	fclose(fp);
-
+	if(DoCreateWnd(hInst))
+	{
+		OutputDebugStringA(">>> çª—å£åˆ›å»ºok");
+	}
+	else
+	{
+		OutputDebugStringA(">>> çª—faild");
+	}
 
 // 	g_hj.AddHookFun("Ws2_32.dll","closesocket", (DWORD)MyClosesocket);
 // 	g_hj.AddHookFun("Ws2_32.dll","recv", (DWORD)MyRecv);
@@ -614,31 +773,11 @@ void WINAPI WinsockHook(void)
 
 	HANDLE hProc = NULL;
 
-	// Set the hook
-	if (Mhook_SetHook((PVOID*)&OrigRecv, MyRecv)) {		
-		//Mhook_Unhook((PVOID*)&OrigRecv);
-	}
-
-	if (Mhook_SetHook((PVOID*)&OrigClosesocket, MyClosesocket)) {		
-		//Mhook_Unhook((PVOID*)&OrigRecv);
-	}
-
-// 	*(PDWORD)&OrigSend = APIHook((DWORD)GetProcAddress(GetModuleHandle("Ws2_32.dll"), "send"), (DWORD)MySend, (DWORD)OrigSend);
-// 	*(PDWORD)&OrigRecv = APIHook((DWORD)GetProcAddress(GetModuleHandle("Ws2_32.dll"), "recv"), (DWORD)MyRecv, (DWORD)OrigRecv);
-// 	*(PDWORD)&OrigSendTo = APIHook((DWORD)GetProcAddress(GetModuleHandle("Ws2_32.dll"), "sendto"), (DWORD)MySendTo, (DWORD)OrigSendTo);
-// 	*(PDWORD)&OrigGethost = APIHook((DWORD)GetProcAddress(GetModuleHandle("Ws2_32.dll"), "gethostbyname"), (DWORD)Mygethostbyname, (DWORD)OrigGethost);
-// 	*(PDWORD)&OrigClosesocket = APIHook((DWORD)GetProcAddress(GetModuleHandle("Ws2_32.dll"), "closesocket"), (DWORD)MyClosesocket, (DWORD)OrigClosesocket);
-// 	*(PDWORD)&OrigConnect = APIHook((DWORD)GetProcAddress(GetModuleHandle("Ws2_32.dll"), "connect"), (DWORD)MyConnect, (DWORD)OrigConnect);
-// 	*(PDWORD)&OrigSocket = APIHook((DWORD)GetProcAddress(GetModuleHandle("Ws2_32.dll"), "socket"), (DWORD)MySocket, (DWORD)OrigSocket);
-// 	*(PDWORD)&OrigWSASend = APIHook((DWORD)GetProcAddress(GetModuleHandle("Ws2_32.dll"), "WSASend"), (DWORD)MyWSASend, (DWORD)OrigWSASend);
-// 	*(PDWORD)&OrigWSARecv = APIHook((DWORD)GetProcAddress(GetModuleHandle("Ws2_32.dll"), "WSARecv"), (DWORD)MyWSARecv, (DWORD)OrigWSARecv);
-
-//	*(PDWORD)&OrigGrfReader = APIHook(0x005426E0, (DWORD)MyGrfReader, (DWORD)OrigGrfReader);
-//	*(PDWORD)&OrigGrfReader = APIHook(0x00735D4A, (DWORD)MyGrfReader, (DWORD)OrigGrfReader);
-//	*(PDWORD)&OrigGrfReader = APIHook(0x00540560, (DWORD)MyGrfReader, (DWORD)OrigGrfReader);
-//	*(PDWORD)&OrigMakeWindow = APIHook(0x00507540, (DWORD)MyMakeWindow, (DWORD)OrigMakeWindow);
-//	*(PDWORD)&OrigLoginWindow = APIHook(0x0045A970, (DWORD)MyLoginWindow, (DWORD)OrigLoginWindow);
-//	*(PDWORD)&OrigSprintf = APIHook(FUNC_SPRINTF, (DWORD)MySprintf, (DWORD)OrigSprintf);
-//	*(PDWORD)&OrigHotKey = APIHook(FUNC_PROCESS_HOTKEY, (DWORD)MyHotKey, (DWORD)OrigHotKey);
-//	*(PDWORD)&OrigTime = APIHook(0x0070E028, (DWORD)MyTime, (DWORD)OrigTime);
+#ifdef _TestMode
+	unsigned int dwThread = 0;
+	HANDLE hth1 = (HANDLE)_beginthreadex(NULL,0,ThreadStaticEntryPoint,0,CREATE_SUSPENDED,&dwThread);
+	ResumeThread(hth1);
+#endif	// Set the hook
+	
+	EnableHook(TRUE);
 }
