@@ -6,7 +6,8 @@
 #include <Assert.h>
 #include <process.h>
 #include <assert.h>
-#include "HookApi.h"
+//#include "HookApi.h"
+#include "mhook.h"
 //#include <openssl/rand.h>
 //#include <openssl/ssl.h>
 //#include <openssl/err.h>
@@ -49,7 +50,7 @@ struct DataFrame{
 
 int g_nSleepStep = 200;
 int g_msgCnt = 0;
-CHookApi_Jmp g_hj;
+//CHookApi_Jmp g_hj;
 map<SOCKET, queue<DataFrame>> g_dataQueueMap;
 
 std::map<SOCKET, int> g_timerMap;
@@ -73,6 +74,7 @@ typedef int (WINAPI *PWSARECV)(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount
 typedef SOCKET (WINAPI *PSOCKET) (int af, int type, int protocol);
 typedef int (WINAPI *PCLOSESOCKET) (SOCKET s);
 
+
 /*
 typedef int (WINAPI *PSPRINTF) (char *_Dest, const char *_Format, va_list ap);
 typedef time_t (WINAPI *PTIME)(time_t *);
@@ -86,12 +88,15 @@ PSOCKET	OrigSocket = socket;
 PCONNECT OrigConnect = connect;
 PSEND OrigSend = send;
 PSENDTO	OrigSendTo = sendto;
-PRECV OrigRecv;
 PWSASEND OrigWSASend;
 PWSARECV OrigWSARecv;
 PGETHOSTBYNAME OrigGethost;
-PCLOSESOCKET OrigClosesocket;
 
+PRECV OrigRecv  = (PRECV)
+	GetProcAddress(GetModuleHandle("Ws2_32.dll"), "recv");
+
+PCLOSESOCKET OrigClosesocket = (PCLOSESOCKET)
+	GetProcAddress(GetModuleHandle("Ws2_32.dll"), "closesocket");
 
 
 /*
@@ -120,10 +125,7 @@ SOCKET WINAPI MySocket(int af, int type, int protocol) {
 }
 
 int WINAPI MyClosesocket (SOCKET s) {
-	g_hj.SetHookOff("closesocket");
-	int nret = closesocket(s);
-	g_hj.SetHookOn("closesocket");
-
+	int nret = OrigClosesocket(s);
 	if (g_timerMap.count(s))
 	{
 		g_timerMap.erase(s);
@@ -285,9 +287,9 @@ bool bNeedBreak0 = false;
 int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 {
 	int RecvedBytes = 0;
-	g_hj.SetHookOff("recv");	
-	RecvedBytes = recv(s, (char*)buf, len, flags);
-	g_hj.SetHookOn("recv");
+	//g_hj.SetHookOff("recv");	
+	RecvedBytes = OrigRecv(s, (char*)buf, len, flags);
+	//g_hj.SetHookOn("recv");
 
 	if(RecvedBytes == SOCKET_ERROR)
 	{
@@ -604,12 +606,22 @@ void WINAPI WinsockHook(void)
 //	fclose(fp);
 
 
-	g_hj.AddHookFun("Ws2_32.dll","closesocket", (DWORD)MyClosesocket);
-	g_hj.AddHookFun("Ws2_32.dll","recv", (DWORD)MyRecv);
+// 	g_hj.AddHookFun("Ws2_32.dll","closesocket", (DWORD)MyClosesocket);
+// 	g_hj.AddHookFun("Ws2_32.dll","recv", (DWORD)MyRecv);
+// 
+// 	g_hj.SetHookOn("closesocket");
+// 	g_hj.SetHookOn("recv");
 
-	g_hj.SetHookOn("closesocket");
-	g_hj.SetHookOn("recv");
+	HANDLE hProc = NULL;
 
+	// Set the hook
+	if (Mhook_SetHook((PVOID*)&OrigRecv, MyRecv)) {		
+		//Mhook_Unhook((PVOID*)&OrigRecv);
+	}
+
+	if (Mhook_SetHook((PVOID*)&OrigClosesocket, MyClosesocket)) {		
+		//Mhook_Unhook((PVOID*)&OrigRecv);
+	}
 
 // 	*(PDWORD)&OrigSend = APIHook((DWORD)GetProcAddress(GetModuleHandle("Ws2_32.dll"), "send"), (DWORD)MySend, (DWORD)OrigSend);
 // 	*(PDWORD)&OrigRecv = APIHook((DWORD)GetProcAddress(GetModuleHandle("Ws2_32.dll"), "recv"), (DWORD)MyRecv, (DWORD)OrigRecv);

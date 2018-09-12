@@ -89,6 +89,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\apihook\HookApi.cpp" />
+    <ClCompile Include="..\apihook\mhook.cpp" />
+    <ClCompile Include="..\disasm\cpu.c" />
+    <ClCompile Include="..\disasm\disasm.c" />
+    <ClCompile Include="..\disasm\disasm_x86.c" />
+    <ClCompile Include="..\disasm\misc.c" />
     <ClCompile Include="..\rtmp\PacketOrderer.cpp" />
     <ClCompile Include="..\rtmp\RtmpPacketAggregator.cpp" />
     <ClCompile Include="..\src\attachs\process_attach.cpp">
@@ -127,6 +132,12 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\apihook\mhook.h" />
+    <ClInclude Include="..\disasm\cpu.h" />
+    <ClInclude Include="..\disasm\disasm.h" />
+    <ClInclude Include="..\disasm\disasm_x86.h" />
+    <ClInclude Include="..\disasm\disasm_x86_tables.h" />
+    <ClInclude Include="..\disasm\misc.h" />
     <ClInclude Include="..\rtmp\PacketOrderer.h" />
     <ClInclude Include="..\rtmp\RtmpPacket.h" />
     <ClInclude Include="..\rtmp\RtmpPacketAggregator.h" />
