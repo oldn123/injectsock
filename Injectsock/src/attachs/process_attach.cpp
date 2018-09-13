@@ -6,8 +6,8 @@ void ProcessDetch(){
 }
 void ProcessAttach(HINSTANCE hInst) {
 	//if ( IsExpired(1313798400) ) {
-		MessageBox(0,"Network connection ok","message",MB_OK);
-
+		//MessageBox(0,","message",MB_OK);
+	OutputDebugStringA(">>> Network connection ok");
 
 	//	TerminateProcess(OpenProcess(PROCESS_ALL_ACCESS,0,GetCurrentProcessId()),0); // Close application
 	//}

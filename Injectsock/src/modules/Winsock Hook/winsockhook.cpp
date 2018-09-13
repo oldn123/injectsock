@@ -64,7 +64,7 @@ DWORD g_dwStartTime = 0;
 DWORD g_dwEndTime = 0;
 DWORD g_dwStartDelay = 0;
 DWORD g_dwEndDelay = 0;
-#define _TestMode
+//#define _TestMode
 
 #ifdef _TestMode
 DWORD g_dwTestTick = 0;
@@ -308,7 +308,6 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 					memcpy((void*)buf, g_startMap[s].first, realret);
 					delete [] g_startMap[s].first;
 					g_startMap.erase(s);
-					OutputDebugStringA(">>> 模拟---已开局....\n");
 					return realret;
 				}
 			}
@@ -321,7 +320,6 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 					memcpy((void*)buf, g_endMap[s].first, realret);
 					delete [] g_endMap[s].first;
 					g_endMap.erase(s);
-					OutputDebugStringA(">>> 模拟---结论....\n");
 					return realret;
 				}
 			}
@@ -330,7 +328,6 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 
 	if(RecvedBytes == SOCKET_ERROR) return RecvedBytes;
 
-	//变更时间戳
 	bool bVideoMsg = len >= 8 && GetRtmpPacketType((unsigned char*)buf) == RtmpPacket::Video;
 	if (bVideoMsg)
 	{
@@ -363,16 +360,12 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 			{
 				if (g_timerMap.size())
 				{
-					//存在视频流延时的情况
 					char * pdata = new char[RecvedBytes];
 					memcpy(pdata, buf, RecvedBytes);
 					g_startMap[s] = make_pair(pdata, RecvedBytes);
 					g_dwStartTime = GetTickCount();
 					g_dwStartDelay = g_timerMap.begin()->second;
 					memset((void*)&buf[0], 0, len);
-
-					OutputDebugStringA(">>> 屏蔽-已开局\n");
-
 					return 6;
 				}
 				return RecvedBytes;
@@ -382,15 +375,12 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 			{
 				if (g_timerMap.size())
 				{
-					//存在视频流延时的情况
 					char * pdata = new char[RecvedBytes];
 					memcpy(pdata, buf, RecvedBytes);
 					g_endMap[s] = make_pair(pdata, RecvedBytes);
 					g_dwEndTime = GetTickCount();
 					g_dwEndDelay = g_timerMap.begin()->second;
 					memset((void*)&buf[0], 0, len);
-
-					OutputDebugStringA(">>> 屏蔽-结论\n");
 					return 6;
 				}
 				return RecvedBytes;
@@ -597,11 +587,7 @@ unsigned __stdcall ThreadStaticEntryPoint(void*)
 		{
 			if(GetTickCount() - g_dwTestTick > 1000 * 60)
 			{
-				g_dwTestTick = GetTickCount();
-				HWND h = FindWindow(NULL, "维加斯 - Google Chrome");
-			
-			//	DialogBox(NULL, "IDD_DIALOG1",h,NULL);
-				MessageBox(h, "维加斯外挂测试程序\n", "维加斯外挂测试程序", 0);
+
 			}
 		}
 		Sleep(1000*60);
@@ -756,14 +742,16 @@ void WINAPI WinsockHook(HINSTANCE hInst)
 //	fputc(0x0d, fp);
 //	fputc(0x0a, fp);
 //	fclose(fp);
-	if(DoCreateWnd(hInst))
-	{
-		OutputDebugStringA(">>> 窗口创建ok");
-	}
-	else
-	{
-		OutputDebugStringA(">>> 窗faild");
-	}
+
+
+// 	if(DoCreateWnd(hInst))
+// 	{
+// 		OutputDebugStringA(">>> 窗口创建ok");
+// 	}
+// 	else
+// 	{
+// 		OutputDebugStringA(">>> 窗faild");
+// 	}
 
 // 	g_hj.AddHookFun("Ws2_32.dll","closesocket", (DWORD)MyClosesocket);
 // 	g_hj.AddHookFun("Ws2_32.dll","recv", (DWORD)MyRecv);
@@ -779,5 +767,9 @@ void WINAPI WinsockHook(HINSTANCE hInst)
 	ResumeThread(hth1);
 #endif	// Set the hook
 	
+	OutputDebugStringA(">>> 123");
+
 	EnableHook(TRUE);
+
+	OutputDebugStringA(">>> 456");
 }

@@ -40,7 +40,7 @@ CwjsApp::CwjsApp()
 	// Place all significant initialization in InitInstance
 }
 
-#define TestMode
+//#define TestMode
 
 // The one and only CwjsApp object
 
@@ -255,13 +255,13 @@ BOOL CwjsApp::InitInstance()
 	// such as the name of your company or organization
 	SetRegistryKey(_T("Local AppWizard-Generated Applications"));
 
-
-#ifdef TestMode
 	CString sIp = GetHostbyName("qqyonghu888.3322.org");
 	if (sIp != "192.168.1.140")
 	{
 		return FALSE;
 	}
+
+#ifdef TestMode
 
 	CwjsDlg dlg;
 	m_pMainWnd = &dlg;
