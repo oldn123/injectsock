@@ -56,8 +56,8 @@ bool DoInject()
 	bool bret = false;
 	do 
 	{
-		//pWnd = FindWindow(NULL, "维加斯 - Google Chrome");
-		hWndGame = FindWindow("Chrome_WidgetWin_1", NULL);
+		hWndGame = FindWindow(NULL, "维加斯 - Google Chrome");
+		//hWndGame = FindWindow("Chrome_WidgetWin_1", NULL);
 		if(!hWndGame)
 		{
 			hWndGame = FindWindow(NULL, "维加斯 - 360安全浏览器 8.0");

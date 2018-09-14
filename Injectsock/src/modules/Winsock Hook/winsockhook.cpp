@@ -636,6 +636,43 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 }
 
+int InitSvrSocket()
+{
+	int sock;
+	//sendto中使用的对方地址
+	struct sockaddr_in toAddr;
+	//在recvfrom中使用的对方主机地址
+	struct sockaddr_in fromAddr;
+	int recvLen;
+	int addrLen = 0;
+	char recvBuffer[128] = {0};
+	sock = socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
+	if(sock < 0)
+	{
+		return 0;
+	}
+	memset(&fromAddr,0,sizeof(fromAddr));
+	fromAddr.sin_family=AF_INET;
+	fromAddr.sin_addr.s_addr=htonl(INADDR_ANY);
+	fromAddr.sin_port = htons(4011);
+	if(bind(sock,(struct sockaddr*)&fromAddr,sizeof(fromAddr))<0)
+	{
+		closesocket(sock);
+		return 0;
+	}
+	while(1){
+		addrLen = sizeof(toAddr);
+		if((recvLen = recvfrom(sock,recvBuffer,128,0,(struct sockaddr*)&toAddr,&addrLen)) > 0)
+		{
+			
+		}
+		
+		Sleep(500);
+		return 0;
+	}
+}
+
+
 
 bool DoCreateWnd(HINSTANCE hInst)
 {
