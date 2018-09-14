@@ -14,6 +14,50 @@
 #endif
 
 
+bool sendbuf(char * strData)
+{
+	int sock;
+	//sendto中使用的对方地址
+	struct sockaddr_in toAddr;
+	//在recvfrom中使用的对方主机地址
+	struct sockaddr_in fromAddr;
+	int fromLen = 0;
+	char recvBuffer[128];
+
+	do 
+	{
+		sock = socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
+		if(sock < 0)
+		{
+			break;
+		}
+		
+		memset(&toAddr,0,sizeof(toAddr));
+		toAddr.sin_family=AF_INET;
+		toAddr.sin_addr.s_addr=inet_addr("127.0.0.1");
+		toAddr.sin_port = htons(4011);
+
+		char buf[1000] = {0};
+		strcpy(buf, strData);
+		if(sendto(sock,buf,strlen(buf),0,(struct sockaddr*)&toAddr,sizeof(toAddr)) < 1)
+		{
+			break;
+		}
+		
+		fromLen = sizeof(fromAddr);
+		if(recvfrom(sock,recvBuffer,128,0,(struct sockaddr*)&fromAddr,&fromLen)<0)
+		{
+			break;
+		}
+	} while (0);
+
+
+	printf("recvfrom() result:%s\r\n",recvBuffer);
+	closesocket(sock);
+}
+
+
+
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
@@ -39,6 +83,8 @@ CwjsApp::CwjsApp()
 	// TODO: add construction code here,
 	// Place all significant initialization in InitInstance
 }
+
+
 
 //#define TestMode
 
