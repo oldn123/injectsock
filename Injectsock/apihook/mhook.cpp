@@ -45,7 +45,7 @@
 #ifdef _DEBUG
 #define ODPRINTF(a) odprintf a
 #else
-#define ODPRINTF(a)
+#define ODPRINTF(a) odprintf a
 #endif
 
 inline void __cdecl odprintf(PCSTR format, ...) {
@@ -62,7 +62,10 @@ inline void __cdecl odprintf(PCSTR format, ...) {
 				buf[len++] = '\r';
 				buf[len++] = '\n';
 				buf[len] = 0;
-				OutputDebugStringA(buf);
+				char str[1024] = {0};
+				strcat(str, ">>> ");
+				strcat(str, buf);
+				OutputDebugStringA(str);
 			}
 			free(buf);
 		}
@@ -84,7 +87,10 @@ inline void __cdecl odprintf(PCWSTR format, ...) {
 				buf[len++] = L'\r';
 				buf[len++] = L'\n';
 				buf[len] = 0;
-				OutputDebugStringW(buf);
+				wchar_t str[1024] = {0};
+				wcscat(str, L">>> ");
+				wcscat(str, buf);
+				OutputDebugStringW(str);
 			}
 			free(buf);
 		}
@@ -910,6 +916,10 @@ BOOL Mhook_Unhook(PVOID *ppHookedFunction) {
 		}
 		// make the other guys runnable
 		ResumeOtherThreads();
+	}
+	else
+	{
+		ODPRINTF((L"mhooks: TrampolineGet return NULL"));
 	}
 	LeaveCritSec();
 	return bRet;
