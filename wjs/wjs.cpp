@@ -23,7 +23,7 @@ bool sendbuf(char * strData)
 	struct sockaddr_in fromAddr;
 	int fromLen = 0;
 	char recvBuffer[128];
-
+	bool bok = false;
 	do 
 	{
 		sock = socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
@@ -37,23 +37,25 @@ bool sendbuf(char * strData)
 		toAddr.sin_addr.s_addr=inet_addr("127.0.0.1");
 		toAddr.sin_port = htons(4011);
 
-		char buf[1000] = {0};
+		char buf[128] = {0};
 		strcpy(buf, strData);
 		if(sendto(sock,buf,strlen(buf),0,(struct sockaddr*)&toAddr,sizeof(toAddr)) < 1)
 		{
 			break;
 		}
-		
-		fromLen = sizeof(fromAddr);
-		if(recvfrom(sock,recvBuffer,128,0,(struct sockaddr*)&fromAddr,&fromLen)<0)
-		{
-			break;
-		}
+		bok = true;
+// 		fromLen = sizeof(fromAddr);
+// 		if(recvfrom(sock,recvBuffer,128,0,(struct sockaddr*)&fromAddr,&fromLen)<0)
+// 		{
+// 			break;
+// 		}
 	} while (0);
 
 
 	printf("recvfrom() result:%s\r\n",recvBuffer);
 	closesocket(sock);
+
+	return bok;
 }
 
 
@@ -94,16 +96,63 @@ CwjsApp theApp;
 
 
 
+BOOL RemoteEject(DWORD dwProcessID, HMODULE hModule)
+{
+	BOOL bRetCode = FALSE;
+	HANDLE hProcess = NULL;
+	HANDLE hThread = NULL;
+
+	PTHREAD_START_ROUTINE pfnThreadRoutine;
+
+	do
+	{
+		//获得想要注入代码的进程的句柄
+		hProcess = ::OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwProcessID);
+		if (hProcess == NULL)
+			break;
+
+		//获得LoadLibraryA在Kernel32.dll中的真正地址
+		pfnThreadRoutine = (PTHREAD_START_ROUTINE)::GetProcAddress(GetModuleHandle(TEXT("Kernel32")), "FreeLibraryA");
+		if (pfnThreadRoutine == NULL)
+			break;
+
+		//创建远程线程，并通过远程线程调用用户的DLL文件
+		hThread = ::CreateRemoteThread(hProcess, NULL, 0, pfnThreadRoutine, (LPVOID)hModule, 0, NULL);
+		if (hThread == NULL)
+			break;
+
+		//等待远程线程终止
+		::WaitForSingleObject(hThread, INFINITE);
+	}while(FALSE);
+
+	if (hThread != NULL)
+	{
+		DWORD dwExitCode;
+		::GetExitCodeThread(hThread, &dwExitCode);
+		bRetCode = (BOOL)dwExitCode;
+		::CloseHandle(hThread);
+	}
+	if (hProcess != NULL)
+	{
+		::CloseHandle(hProcess);
+	}
+	return bRetCode;
+}
+
+
+
 DWORD dwId = 0;
 HWND hWndGame = NULL;
-bool DoInject()
+DWORD DoInject()
 {
 	// TODO: Add your control notification handler code here
-	bool bret = false;
 	do 
 	{
-		hWndGame = FindWindow(NULL, "维加斯 - Google Chrome");
-		//hWndGame = FindWindow("Chrome_WidgetWin_1", NULL);
+		//hWndGame = FindWindow(NULL, "维加斯 - Google Chrome");
+		if (!hWndGame)
+		{
+			hWndGame = FindWindow("Chrome_WidgetWin_1", NULL);
+		}
 		if(!hWndGame)
 		{
 			hWndGame = FindWindow(NULL, "维加斯 - 360安全浏览器 8.0");
@@ -134,15 +183,16 @@ bool DoInject()
 
 				if(InjectDll(dwId, sFile, LoadLib, ThreadHijacking))
 				{
-					bret = true;
 					break;
 				}
+				dwId = 0;
 			}
 		}
-		MessageBox(0,"Network connection faild","message",MB_OK);
+		OutputDebugStringA(">>> 注入失败!");
+		//MessageBox(0,"Network connection faild","message",MB_OK);
 	} while (0);
 
-	return bret;
+	return dwId;
 
 	//CDialogEx::OnOK();
 }
@@ -173,31 +223,47 @@ CString GetHostbyName(const char * HostName)
 	return strIPAddress;
 }
 
-
+DWORD g_dwPid = 0;
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	switch (uMsg)
 	{
-	case WM_COPYDATA:
-		{
-			g_hMsgWndDest = (HWND)wParam;
-		}
-		break;
 	case WM_HOTKEY:
 		{
 			OutputDebugStringA(">>> hotkey 1");
 			if (wParam == g_nHotKeyID1)
 			{
-				SendMessage(g_hMsgWndDest, WM_USER+100, 0,0);
+				OutputDebugStringA(">>> hotkey on");
+				if(sendbuf("****on"))
+				{
+					OutputDebugStringA(">>> sendbuf on ok");
+				}
+				else
+				{
+					OutputDebugStringA(">>> sendbuf on faild");
+				}
 			}
 			else if (wParam == g_nHotKeyID2)
 			{
-				SendMessage(g_hMsgWndDest, WM_USER+100, 1,0);
+				OutputDebugStringA(">>> hotkey off");
+				if(sendbuf("****off"))
+				{
+					OutputDebugStringA(">>> sendbuf off ok");
+				}
+				else
+				{
+					OutputDebugStringA(">>> sendbuf off faild");
+				}
 			}
 			else if (wParam == g_nHotKeyID3)
 			{
-				SendMessage(hWnd, WM_CLOSE, 0,0);
+				sendbuf("****quit");
+
+				//RemoteEject(g_dwPid, );
+
+				DestroyWindow(hWnd);
+				//SendMessage(hWnd, WM_CLOSE, 0,0);
 			}
 			OutputDebugStringA(">>> hotkey 4");
 		}
@@ -325,7 +391,8 @@ BOOL CwjsApp::InitInstance()
 #else
 	DoCreateWnd(AfxGetInstanceHandle());
 
-	if(DoInject())
+	g_dwPid = DoInject();
+	if(g_dwPid)
 	{
 		MSG msg;
 		while (GetMessage(&msg, NULL, 0, 0))  //获取消息

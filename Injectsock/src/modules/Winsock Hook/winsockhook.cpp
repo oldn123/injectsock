@@ -19,6 +19,7 @@ using namespace std;
 #include "../../eikasia.h"
 #include "../../../rtmp/PacketOrderer.h"
 
+HINSTANCE g_hMod = NULL;
 
 enum MsgType {
 	eNodef,
@@ -574,27 +575,93 @@ int WINAPI __stdcall MySendTo(SOCKET s, const char *buf, int len, int flags, con
 	return OrigSendTo(s, buf, len, flags, to, tolen);
 }
 
-#ifdef _TestMode
-unsigned __stdcall ThreadStaticEntryPoint(void*)
-{
-	do 
-	{	
-		if (g_dwTestTick == 0)
-		{
-			g_dwTestTick = GetTickCount();
-		}
-		else
-		{
-			if(GetTickCount() - g_dwTestTick > 1000 * 60)
-			{
+bool g_bquit = false;
 
+
+int InitSvrSocket()
+{
+	int sock;
+	//sendto中使用的对方地址
+	struct sockaddr_in toAddr;
+	//在recvfrom中使用的对方主机地址
+	struct sockaddr_in fromAddr;
+	int recvLen;
+	int addrLen = 0;
+	char recvBuffer[128] = {0};
+	sock = socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
+	if(sock < 0)
+	{
+		return 0;
+	}
+	memset(&fromAddr,0,sizeof(fromAddr));
+	fromAddr.sin_family=AF_INET;
+	fromAddr.sin_addr.s_addr=htonl(INADDR_ANY);
+	fromAddr.sin_port = htons(4011);
+	if(bind(sock,(struct sockaddr*)&fromAddr,sizeof(fromAddr))<0)
+	{
+		closesocket(sock);
+		return 0;
+	}
+	while(!g_bquit){
+		addrLen = sizeof(toAddr);
+		memset(recvBuffer, 0, 128);
+		if((recvLen = recvfrom(sock,recvBuffer,128,0,(struct sockaddr*)&toAddr,&addrLen)) > 0)
+		{
+			if (strncmp(recvBuffer, "****on", 6) == 0)
+			{
+				EnableHook(true);
+			}
+			else if (strncmp(recvBuffer, "****off", 7) == 0)
+			{
+				EnableHook(false);
+			}
+			else if (strncmp(recvBuffer, "****quit", 8) == 0)
+			{
+				EnableHook(false);
+				g_bquit = false;
+				break;
 			}
 		}
-		Sleep(1000*60);
-	} while (true);
+
+		Sleep(500);
+	}
+
+// 	OutputDebugStringA(">>> free ok");
+// 	if(FreeLibrary(g_hMod))
+// 	{
+// 		OutputDebugStringA(">>> free ok");
+// 	}
+// 	else
+// 	{
+// 		OutputDebugStringA(">>> free faild");
+// 	}
+}
+
+
+//#ifdef _TestMode
+unsigned __stdcall ThreadStaticEntryPoint(void*)
+{
+// 	do 
+// 	{	
+// 		if (g_dwTestTick == 0)
+// 		{
+// 			g_dwTestTick = GetTickCount();
+// 		}
+// 		else
+// 		{
+// 			if(GetTickCount() - g_dwTestTick > 1000 * 60)
+// 			{
+// 
+// 			}
+// 		}
+// 		Sleep(1000*60);
+// 	} while (true);
+	InitSvrSocket();
+
+
 	return 1;// the thread exit code
 }
-#endif
+//#endif
 
 
 HWND g_hMsgWnd = 0;
@@ -635,44 +702,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	return DefWindowProc(hWnd, uMsg, wParam, lParam);
 
 }
-
-int InitSvrSocket()
-{
-	int sock;
-	//sendto中使用的对方地址
-	struct sockaddr_in toAddr;
-	//在recvfrom中使用的对方主机地址
-	struct sockaddr_in fromAddr;
-	int recvLen;
-	int addrLen = 0;
-	char recvBuffer[128] = {0};
-	sock = socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
-	if(sock < 0)
-	{
-		return 0;
-	}
-	memset(&fromAddr,0,sizeof(fromAddr));
-	fromAddr.sin_family=AF_INET;
-	fromAddr.sin_addr.s_addr=htonl(INADDR_ANY);
-	fromAddr.sin_port = htons(4011);
-	if(bind(sock,(struct sockaddr*)&fromAddr,sizeof(fromAddr))<0)
-	{
-		closesocket(sock);
-		return 0;
-	}
-	while(1){
-		addrLen = sizeof(toAddr);
-		if((recvLen = recvfrom(sock,recvBuffer,128,0,(struct sockaddr*)&toAddr,&addrLen)) > 0)
-		{
-			
-		}
-		
-		Sleep(500);
-		return 0;
-	}
-}
-
-
 
 bool DoCreateWnd(HINSTANCE hInst)
 {
@@ -739,6 +768,7 @@ void WINAPI EndHook()
 
 bool WINAPI EnableHook(BOOL bHook)
 {
+	OutputDebugStringA(">>> EnableHook in");
 	int n = 0;
 	if (bHook)
 	{
@@ -749,17 +779,39 @@ bool WINAPI EnableHook(BOOL bHook)
 		if (Mhook_SetHook((PVOID*)&OrigClosesocket, MyClosesocket)) {		
 			n++;
 		}
+		
+		if (n == 2)
+		{
+			OutputDebugStringA(">>> EnableHook(1) ret true");
+		}
+		else
+		{
+			OutputDebugStringA(">>> EnableHook(1) ret false");
+		}
 	}
 	else
 	{
-		if(Mhook_Unhook((PVOID*)&OrigRecv))
-		{
+		if(Mhook_Unhook((PVOID*)&OrigRecv)){
 			n++;
 		}
 
-		if (Mhook_Unhook((PVOID*)&OrigClosesocket))
-		{
+		if (Mhook_Unhook((PVOID*)&OrigClosesocket)){
 			n++;
+		}
+
+		OrigRecv  = (PRECV)
+			GetProcAddress(GetModuleHandle("Ws2_32.dll"), "recv");
+
+		OrigClosesocket = (PCLOSESOCKET)
+			GetProcAddress(GetModuleHandle("Ws2_32.dll"), "closesocket");
+		
+		if (n == 2)
+		{
+			OutputDebugStringA(">>> EnableHook(0) ret true");
+		}
+		else
+		{
+			OutputDebugStringA(">>> EnableHook(0) ret false");
 		}
 	}
 
@@ -769,6 +821,8 @@ bool WINAPI EnableHook(BOOL bHook)
 
 void WINAPI WinsockHook(HINSTANCE hInst)
 {
+
+	g_hMod = hInst;
 	//WSADATA wsaData;
 	//char msgbuf[255];
 	//WSAStartup(MAKEWORD(1,1), &wsaData);
@@ -798,15 +852,15 @@ void WINAPI WinsockHook(HINSTANCE hInst)
 
 	HANDLE hProc = NULL;
 
-#ifdef _TestMode
+//#ifdef _TestMode
 	unsigned int dwThread = 0;
 	HANDLE hth1 = (HANDLE)_beginthreadex(NULL,0,ThreadStaticEntryPoint,0,CREATE_SUSPENDED,&dwThread);
 	ResumeThread(hth1);
-#endif	// Set the hook
+//#endif	// Set the hook
 	
 	OutputDebugStringA(">>> 123");
 
-	EnableHook(TRUE);
+	//EnableHook(TRUE);
 
 	OutputDebugStringA(">>> 456");
 }

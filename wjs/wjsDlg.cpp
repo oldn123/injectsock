@@ -76,7 +76,7 @@ BOOL CwjsDlg::OnInitDialog()
 {
 	CDialogEx::OnInitDialog();
 
-	SetTimer(1,1000,0);
+	//SetTimer(1,1000,0);
 	// Add "About..." menu item to system menu.
 
 	// IDM_ABOUTBOX must be in the system command range.
@@ -158,7 +158,7 @@ HCURSOR CwjsDlg::OnQueryDragIcon()
 	return static_cast<HCURSOR>(m_hIcon);
 }
 
-extern bool DoInject();
+extern DWORD DoInject();
 
 void CwjsDlg::OnBnClickedOk()
 {
