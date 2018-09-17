@@ -97,8 +97,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <None Include="ReadMe.txt" />
-    <None Include="res\wjs.ico" />
-    <None Include="res\wjs.rc2" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Resource.h" />

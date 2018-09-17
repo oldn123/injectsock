@@ -20,7 +20,7 @@ public:
 	CAboutDlg();
 
 // Dialog Data
-	enum { IDD = IDD_ABOUTBOX };
+	//enum { IDD = IDD_ABOUTBOX };
 
 	protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
@@ -30,7 +30,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 };
 
-CAboutDlg::CAboutDlg() : CDialogEx(CAboutDlg::IDD)
+CAboutDlg::CAboutDlg() : CDialogEx(10)
 {
 }
 
@@ -49,9 +49,9 @@ END_MESSAGE_MAP()
 
 
 CwjsDlg::CwjsDlg(CWnd* pParent /*=NULL*/)
-	: CDialogEx(CwjsDlg::IDD, pParent)
+	: CDialogEx(10, pParent)
 {
-	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
+//	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
 
 void CwjsDlg::DoDataExchange(CDataExchange* pDX)
