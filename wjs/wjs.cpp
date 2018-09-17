@@ -1,4 +1,4 @@
-
+ï»¿
 // wjs.cpp : Defines the class behaviors for the application.
 //
 
@@ -14,12 +14,15 @@
 #endif
 
 
+DWORD dwId = 0;
+HWND hWndGame = NULL;
+
 bool sendbuf(char * strData)
 {
 	int sock;
-	//sendtoÖĞÊ¹ÓÃµÄ¶Ô·½µØÖ·
+	//sendtoä¸­ä½¿ç”¨çš„å¯¹æ–¹åœ°å€
 	struct sockaddr_in toAddr;
-	//ÔÚrecvfromÖĞÊ¹ÓÃµÄ¶Ô·½Ö÷»úµØÖ·
+	//åœ¨recvfromä¸­ä½¿ç”¨çš„å¯¹æ–¹ä¸»æœºåœ°å€
 	struct sockaddr_in fromAddr;
 	int fromLen = 0;
 	char recvBuffer[128];
@@ -106,22 +109,22 @@ BOOL RemoteEject(DWORD dwProcessID, HMODULE hModule)
 
 	do
 	{
-		//»ñµÃÏëÒª×¢Èë´úÂëµÄ½ø³ÌµÄ¾ä±ú
+		//è·å¾—æƒ³è¦æ³¨å…¥ä»£ç çš„è¿›ç¨‹çš„å¥æŸ„
 		hProcess = ::OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwProcessID);
 		if (hProcess == NULL)
 			break;
 
-		//»ñµÃLoadLibraryAÔÚKernel32.dllÖĞµÄÕæÕıµØÖ·
+		//è·å¾—LoadLibraryAåœ¨Kernel32.dllä¸­çš„çœŸæ­£åœ°å€
 		pfnThreadRoutine = (PTHREAD_START_ROUTINE)::GetProcAddress(GetModuleHandle(TEXT("Kernel32")), "FreeLibraryA");
 		if (pfnThreadRoutine == NULL)
 			break;
 
-		//´´½¨Ô¶³ÌÏß³Ì£¬²¢Í¨¹ıÔ¶³ÌÏß³Ìµ÷ÓÃÓÃ»§µÄDLLÎÄ¼ş
+		//åˆ›å»ºè¿œç¨‹çº¿ç¨‹ï¼Œå¹¶é€šè¿‡è¿œç¨‹çº¿ç¨‹è°ƒç”¨ç”¨æˆ·çš„DLLæ–‡ä»¶
 		hThread = ::CreateRemoteThread(hProcess, NULL, 0, pfnThreadRoutine, (LPVOID)hModule, 0, NULL);
 		if (hThread == NULL)
 			break;
 
-		//µÈ´ıÔ¶³ÌÏß³ÌÖÕÖ¹
+		//ç­‰å¾…è¿œç¨‹çº¿ç¨‹ç»ˆæ­¢
 		::WaitForSingleObject(hThread, INFINITE);
 	}while(FALSE);
 
@@ -141,32 +144,30 @@ BOOL RemoteEject(DWORD dwProcessID, HMODULE hModule)
 
 
 
-DWORD dwId = 0;
-HWND hWndGame = NULL;
 DWORD DoInject()
 {
 	// TODO: Add your control notification handler code here
 	do 
 	{
-		//hWndGame = FindWindow(NULL, "Î¬¼ÓË¹ - Google Chrome");
+		if (hWndGame && !::IsWindow(hWndGame))
+		{
+			hWndGame = NULL;
+		}
+
+		//hWndGame = FindWindow(NULL, "ç»´åŠ æ–¯ - Google Chrome");
 		if (!hWndGame)
 		{
 			hWndGame = FindWindow("Chrome_WidgetWin_1", NULL);
 		}
 		if(!hWndGame)
 		{
-			hWndGame = FindWindow(NULL, "Î¬¼ÓË¹ - 360°²È«ä¯ÀÀÆ÷ 8.0");
+			hWndGame = FindWindow(NULL, "ç»´åŠ æ–¯ - 360å®‰å…¨æµè§ˆå™¨ 8.0");
 			//	pWnd = FindWindow("360se6_Frame", NULL);
 		}
 		if(!hWndGame)
 		{
-			hWndGame = FindWindow(NULL, "Î¬¼ÓË¹ - 360°²È«ä¯ÀÀÆ÷ 8.1");
+			hWndGame = FindWindow(NULL, "ç»´åŠ æ–¯ - 360å®‰å…¨æµè§ˆå™¨ 8.1");
 			//	pWnd = FindWindow("360se6_Frame", NULL);
-		}
-		if(!hWndGame)
-		{
-			hWndGame = FindWindow(NULL, "Î¬¼ÓË¹ - Internet Explorer");
-			//pWnd = FindWindow("Internet Explorer_Server", NULL);
 		}
 
 		if (hWndGame)
@@ -188,7 +189,7 @@ DWORD DoInject()
 				dwId = 0;
 			}
 		}
-		OutputDebugStringA(">>> ×¢ÈëÊ§°Ü!");
+		OutputDebugStringA(">>> æ³¨å…¥å¤±è´¥!");
 		//MessageBox(0,"Network connection faild","message",MB_OK);
 	} while (0);
 
@@ -205,11 +206,11 @@ CString GetHostbyName(const char * HostName)
 	WSADATA WSAData;
 
 	WSA_return=WSAStartup(0x0202,&WSAData);
-	/* ½á¹¹Ö¸Õë */ 
+	/* ç»“æ„æŒ‡é’ˆ */ 
 	HOSTENT *host_entry;
 	if(WSA_return==0)
 	{
-		/* ¼´Òª½âÎöµÄÓòÃû»òÖ÷»úÃû */
+		/* å³è¦è§£æçš„åŸŸåæˆ–ä¸»æœºå */
 		host_entry=gethostbyname(HostName);
 		if(host_entry!=0)
 		{
@@ -225,6 +226,7 @@ CString GetHostbyName(const char * HostName)
 
 DWORD g_dwPid = 0;
 
+
 LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	switch (uMsg)
@@ -234,6 +236,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			OutputDebugStringA(">>> hotkey 1");
 			if (wParam == g_nHotKeyID1)
 			{
+				if (!hWndGame || !IsWindow(hWndGame))
+				{
+					g_dwPid = DoInject();
+				}
+				else
+				{
+					OutputDebugStringA(">>> çª—å£ä»æœ‰æ•ˆ");
+				}
+				
 				OutputDebugStringA(">>> hotkey on");
 				if(sendbuf("****on"))
 				{
@@ -272,7 +283,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		UnregisterHotKey(hWnd, g_nHotKeyID1);
 		UnregisterHotKey(hWnd, g_nHotKeyID2);
 		UnregisterHotKey(hWnd, g_nHotKeyID3);
-		PostQuitMessage(0);//¿ÉÒÔÊ¹GetMessage·µ»Ø0
+		PostQuitMessage(0);//å¯ä»¥ä½¿GetMessageè¿”å›0
 		break;
 	default:
 		break;
@@ -286,7 +297,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 bool DoCreateWnd(HINSTANCE hInst)
 {
-	//×¢²á´°¿ÚÀà
+	//æ³¨å†Œçª—å£ç±»
 
 	WNDCLASSEX wce = { 0 };
 	wce.cbSize = sizeof(wce);
@@ -314,7 +325,7 @@ bool DoCreateWnd(HINSTANCE hInst)
 	}
 
 
-	//ÏòÏµÍ³×¢²áÈÈ¼ü:ALT+0
+	//å‘ç³»ç»Ÿæ³¨å†Œçƒ­é”®:ALT+0
 
 
 
@@ -392,13 +403,13 @@ BOOL CwjsApp::InitInstance()
 	DoCreateWnd(AfxGetInstanceHandle());
 
 	g_dwPid = DoInject();
-	if(g_dwPid)
+	//if(g_dwPid)
 	{
 		MSG msg;
-		while (GetMessage(&msg, NULL, 0, 0))  //»ñÈ¡ÏûÏ¢
+		while (GetMessage(&msg, NULL, 0, 0))  //è·å–æ¶ˆæ¯
 		{
-			TranslateMessage(&msg);    //½«ĞéÄâ¼üÏûÏ¢×ª»»Îª×Ö·ûÏûÏ¢¡£×Ö·ûÏûÏ¢±»·¢ËÍµ½µ÷ÓÃÏß³ÌµÄÏûÏ¢¶ÓÁĞ£¬ÔÚÏÂÒ»´ÎÏß³Ìµ÷ÓÃGetMessage»òPeekMessageº¯ÊıÊ±¶ÁÈ¡
-			DispatchMessage(&msg);     //½«ÏûÏ¢·ÖÅÉ¸ø´°¿Ú¹ı³Ì¡£ËüÍ¨³£ÓÃÓÚ·ÖÅÉÓÉGetMessageº¯Êı¼ìË÷µÄÏûÏ¢¡£
+			TranslateMessage(&msg);    //å°†è™šæ‹Ÿé”®æ¶ˆæ¯è½¬æ¢ä¸ºå­—ç¬¦æ¶ˆæ¯ã€‚å­—ç¬¦æ¶ˆæ¯è¢«å‘é€åˆ°è°ƒç”¨çº¿ç¨‹çš„æ¶ˆæ¯é˜Ÿåˆ—ï¼Œåœ¨ä¸‹ä¸€æ¬¡çº¿ç¨‹è°ƒç”¨GetMessageæˆ–PeekMessageå‡½æ•°æ—¶è¯»å–
+			DispatchMessage(&msg);     //å°†æ¶ˆæ¯åˆ†æ´¾ç»™çª—å£è¿‡ç¨‹ã€‚å®ƒé€šå¸¸ç”¨äºåˆ†æ´¾ç”±GetMessageå‡½æ•°æ£€ç´¢çš„æ¶ˆæ¯ã€‚
 		}
 	}
 #endif
