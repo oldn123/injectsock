@@ -337,7 +337,7 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 			g_timerMap[s] = 0;
 		}
 
-		if (g_timerMap[s] >= 15 * 1000)
+		if (g_timerMap[s] >= 20 * 1000)
 		{
 			return RecvedBytes;
 		}
