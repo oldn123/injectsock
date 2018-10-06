@@ -10,7 +10,7 @@
 #include <fstream>
 #include "..\dllinjector.h"
 
-#pragma comment(lib,"ntdll.lib")
+//#pragma comment(lib,"ntdll.lib")
 #pragma comment(lib, "Advapi32.lib")
 
 #ifdef _WIN64
@@ -19,7 +19,9 @@
 #define IMAGE_FILE_MACHINE IMAGE_FILE_MACHINE_I386
 #endif
 
-extern "C" NTSTATUS NTAPI RtlAdjustPrivilege(ULONG Privilege, BOOLEAN Enable, BOOLEAN CurrentThread, PBOOLEAN Enabled);
+
+typedef int (_stdcall *_RtlAdjustPrivilege)(int, BOOL, BOOL, int *);
+//extern "C" NTSTATUS NTAPI RtlAdjustPrivilege(ULONG Privilege, BOOLEAN Enable, BOOLEAN CurrentThread, PBOOLEAN Enabled);
 
 typedef std::basic_string<TCHAR> inject_string;
 
@@ -117,20 +119,27 @@ inline BOOL WINAPI ManualMapInternalLoadDll(LPMANUAL_INJECT ManualInject)
 
 namespace DllInject
 {
-	inline BOOL HijackThread(HANDLE hProc, LPVOID fn, LPVOID arg)
+	inline HMODULE HijackThread(HANDLE hProc, LPVOID fn, LPVOID arg)
 	{
-		BOOLEAN bl;
-		RtlAdjustPrivilege(20, 1, 0, &bl);
+		HMODULE hRet = NULL;
+		int bl;
+		
+		_RtlAdjustPrivilege fRtlAdjustPrivilege = (_RtlAdjustPrivilege)GetProcAddress(LoadLibraryA("ntdll.dll"), "RtlAdjustPrivilege") ;
+		if (fRtlAdjustPrivilege)
+		{
+			fRtlAdjustPrivilege(20, 1, 0, &bl);
+		}
+		//RtlAdjustPrivilege(20, 1, 0, &bl);
 
 		DWORD ProcessId = GetProcessId(hProc);
 
 		HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
 		if (!hSnap)
-			return FALSE;
+			return NULL;
 		THREADENTRY32 te32;
 		te32.dwSize = sizeof(THREADENTRY32);
 		if (!Thread32First(hSnap, &te32))
-			return FALSE;
+			return NULL;
 		do
 		{
 			if (te32.th32OwnerProcessID == ProcessId && te32.th32ThreadID != GetCurrentThreadId())
@@ -140,20 +149,21 @@ namespace DllInject
 
 		HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, 0, te32.th32ThreadID);
 		if (!hThread)
-			return FALSE;
+			return NULL;
 		if (SuspendThread(hThread) == (DWORD)-1)
 		{
 			CloseHandle(hThread);
-			return FALSE;
+			return NULL;
 		}
 
 		CONTEXT ctx;
+		memset(&ctx, 0, sizeof(CONTEXT));
 		ctx.ContextFlags = CONTEXT_CONTROL;
 		if (!GetThreadContext(hThread, &ctx))
 		{
 			ResumeThread(hThread);
 			CloseHandle(hThread);
-			return FALSE;
+			return NULL;
 		}
 
 		LPVOID shellCodeAddress = VirtualAllocEx(hProc, 0, 0x100, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -161,7 +171,7 @@ namespace DllInject
 		{
 			ResumeThread(hThread);
 			CloseHandle(hThread);
-			return 0;
+			return NULL;
 		}
 
 #ifdef _WIN64
@@ -181,15 +191,18 @@ namespace DllInject
 
 			0x48, 0x83, 0xEC, 0x20,												// + 0x33			-> sub rsp, 0x20
 			0xFF, 0xD0,															// + 0x37			-> call rax
-			0x48, 0x83, 0xC4, 0x20,												// + 0x39			-> add rsp, 0x20
 
-			0x9D,																// + 0x3D			-> popfq
-			0x41, 0x5B, 0x41, 0x5A, 0x41, 0x59, 0x41, 0x58, 0x5A, 0x59, 0x58,	// + 0x3E			-> pop r(11-8) / r(dca)x
+			0x48, 0xA3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,			// + 0x39 (* 0x3B)	-> mov qword ptr[0], rax
 
-			0xC6, 0x05, 0xB0, 0xFF, 0xFF, 0xFF, 0x00,							// + 0x49			-> mov byte ptr[$ - 0x49], 0
+			0x48, 0x83, 0xC4, 0x20,												// + 0x43			-> add rsp, 0x20
 
-			0xC3																// + 0x50			-> ret
-		}; // SIZE = 0x51
+			0x9D,																// + 0x47			-> popfq
+			0x41, 0x5B, 0x41, 0x5A, 0x41, 0x59, 0x41, 0x58, 0x5A, 0x59, 0x58,	// + 0x48			-> pop r(11-8) / r(dca)x
+
+			//0xC6, 0x05, 0xB0, 0xFF, 0xFF, 0xFF, 0x00,							// + 0x49			-> mov byte ptr[$ - 0x49], 0
+
+			0xC3																// + 0x53			-> ret
+		}; // SIZE = 0x54
 
 		DWORD dwLoRIP = (DWORD)(ctx.Rip & 0xFFFFFFFF);
 		DWORD dwHiRIP = (DWORD)((ctx.Rip >> 0x20) & 0xFFFFFFFF);
@@ -198,6 +211,7 @@ namespace DllInject
 		*(DWORD*)(Shellcode + 0x0F) = dwHiRIP;
 		*(void**)(Shellcode + 0x21) = fn;
 		*(void**)(Shellcode + 0x2B) = arg;
+		*(void**)(Shellcode + 0x3B) = shellCodeAddress;
 
 		ctx.Rip = (DWORD64)shellCodeAddress;
 
@@ -218,12 +232,14 @@ namespace DllInject
 														// + 0x16 (__fastcall)	-> nop (0x90)
 			0xFF, 0xD0,									// + 0x17				-> call eax
 
-			0x61,										// + 0x19				-> popad
-			0x9D,										// + 0x1A				-> popfd
+			0xA3, 0x00, 0x00, 0x00, 0x00,				// + 0x19 (+ 0x1A)		-> mov dword ptr[pCodecave], eax
 
-			0xC6, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00,	// + 0x1B (+ 0x1D)		-> mov byte ptr[pCodecave], 0
+			0x61,										// + 0x1E				-> popad
+			0x9D,										// + 0x1F				-> popfd
 
-			0xC3										// + 0x22				-> ret
+			//0xC6, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00,	// + 0x1B (+ 0x1D)		-> mov byte ptr[pCodecave], 0
+
+			0xC3										// + 0x20				-> ret
 		}; // SIZE = 0x23
 
 		Shellcode[0x16] = 0x51;
@@ -231,17 +247,18 @@ namespace DllInject
 		*(DWORD*)(Shellcode + 0x06) = ctx.Eip;
 		*(void**)(Shellcode + 0x0D) = arg;
 		*(void**)(Shellcode + 0x12) = fn;
-		*(void**)(Shellcode + 0x1D) = shellCodeAddress;
+		*(void**)(Shellcode + 0x1A) = shellCodeAddress;
 
 		ctx.Eip = (DWORD)(shellCodeAddress);
 #endif
+		DWORD_PTR dwCheckByteSrc = *(DWORD_PTR*)&Shellcode[0];
 
 		if (!WriteProcessMemory(hProc, shellCodeAddress, Shellcode, sizeof(Shellcode), 0))
 		{
 			VirtualFreeEx(hProc, shellCodeAddress, 0, MEM_RELEASE);
 			ResumeThread(hThread);
 			CloseHandle(hThread);
-			return 0;
+			return NULL;
 		}
 
 		if (!SetThreadContext(hThread, &ctx))
@@ -250,33 +267,43 @@ namespace DllInject
 
 			ResumeThread(hThread);
 			CloseHandle(hThread);
-			return 0;
+			return NULL;
 		}
 
 		if (ResumeThread(hThread) == (DWORD)-1)
 		{
 			VirtualFreeEx(hProc, shellCodeAddress, 0, MEM_RELEASE);
 			CloseHandle(hThread);
-			return FALSE;
+			return NULL;
 		}
 
-		BYTE CheckByte = 1;
-		while (CheckByte)
+		DWORD_PTR dwCheckByte = dwCheckByteSrc;
+		while (true)
 		{
-			ReadProcessMemory(hProc, shellCodeAddress, &CheckByte, 1, nullptr);
-			Sleep(10);
+			dwCheckByte = 0;
+			if(ReadProcessMemory(hProc, shellCodeAddress, &dwCheckByte, sizeof(DWORD_PTR), nullptr))
+			{
+				if (dwCheckByteSrc != dwCheckByte)
+				{
+					hRet = (HMODULE)dwCheckByte;
+					break;
+				}
+			}
+			Sleep(100);
 		}
 
 		VirtualFreeEx(hProc, shellCodeAddress, 0, MEM_RELEASE);
 		CloseHandle(hThread);
-		return TRUE;
+
+		return hRet;
 	}
 
-	inline BOOL CreateThreadEx(HANDLE hProc, LPVOID fn, LPVOID arg)
+	inline HMODULE CreateThreadEx(HANDLE hProc, LPVOID fn, LPVOID arg)
 	{
+		HMODULE hModRet = NULL;
 		HANDLE hThread = CreateRemoteThread(hProc, 0, 0, (LPTHREAD_START_ROUTINE)fn, arg, 0, 0);
 		if (!hThread)
-			return FALSE;
+			return NULL;
 		WaitForSingleObject(hThread, INFINITE);
 		DWORD ExitCode;
 		do
@@ -285,10 +312,11 @@ namespace DllInject
 			Sleep(1);
 		} while (ExitCode == STILL_ACTIVE);
 		CloseHandle(hThread);
-		return TRUE;
+		hModRet = (HMODULE)ExitCode;
+		return hModRet;
 	}
 
-	inline BOOL NtCreateThreadEx(HANDLE hProc, LPVOID fn, LPVOID arg)
+	inline HMODULE NtCreateThreadEx(HANDLE hProc, LPVOID fn, LPVOID arg)
 	{
 		struct NtCreateThreadExBuffer
 		{
@@ -316,7 +344,7 @@ namespace DllInject
 			ULONG SizeOfStackReserve,
 			LPVOID lpBytesBuffer);
 
-
+		HMODULE hRet = NULL;
 		auto ntCreateThreadEx = (NtCreateThreadEx_t)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtCreateThreadEx");
 		DWORD temp1 = 0;
 		DWORD temp2 = 0;
@@ -334,7 +362,7 @@ namespace DllInject
 		HANDLE hThread;
 		ntCreateThreadEx(&hThread, 0x1FFFFF, 0, hProc, (LPTHREAD_START_ROUTINE)fn, arg, FALSE, 0, 0, 0, &buffer);
 		if (!hThread)
-			return FALSE;
+			return NULL;
 		WaitForSingleObject(hThread, INFINITE);
 		DWORD ExitCode;
 		do
@@ -343,10 +371,10 @@ namespace DllInject
 			Sleep(1);
 		} while (ExitCode == STILL_ACTIVE);
 		CloseHandle(hThread);
-		return TRUE;
+		return hRet;
 	}
 
-	inline BOOL StartRoutline(HANDLE hProc, LPVOID fn, LPVOID arg, StartMethod startMethod)
+	inline HMODULE StartRoutline(HANDLE hProc, LPVOID fn, LPVOID arg, StartMethod startMethod)
 	{
 		switch (startMethod)
 		{
@@ -355,19 +383,19 @@ namespace DllInject
 		case StartMethod::ThreadHijacking:
 			return HijackThread(hProc, fn, arg);
 		}
-		return FALSE;
+		return NULL;
 	}
 
 	//Standard Injection.
-	inline BOOL LoadLib(HANDLE hproc, const inject_string& dllpath, StartMethod startMethod)
+	inline HMODULE LoadLib(HANDLE hproc, const inject_string& dllpath, StartMethod startMethod)
 	{
 		LPVOID remoteString = VirtualAllocEx(hproc, 0, _MAX_PATH, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
 		if (!remoteString)
-			return FALSE;
+			return NULL;
 		if (!WriteProcessMemory(hproc, remoteString, dllpath.c_str(), dllpath.size() + 1, 0))
 		{
 			VirtualFreeEx(hproc, remoteString, _MAX_PATH, MEM_RELEASE);
-			return FALSE;
+			return NULL;
 		}
 		auto result = StartRoutline(hproc, GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA"), remoteString, startMethod);
 		VirtualFreeEx(hproc, remoteString, _MAX_PATH, MEM_RELEASE);
@@ -375,28 +403,29 @@ namespace DllInject
 	}
 
 	//ManualMap Injection. Only work on release version
-	inline BOOL ManualMap(HANDLE hproc, const inject_string& dllPath, StartMethod startMethod)
+	inline HMODULE ManualMap(HANDLE hproc, const inject_string& dllPath, StartMethod startMethod)
 	{
+		HMODULE hRet = NULL;
 		if (GetFileAttributes(dllPath.c_str()) == INVALID_FILE_ATTRIBUTES)
-			return FALSE;
+			return hRet;
 
 		std::ifstream file(dllPath, std::ios::binary | std::ios::ate);
 
 		if (file.fail())
-			return FALSE;
+			return hRet;
 
 		auto fileSize = file.tellg();
 		if (fileSize < 0x1000)
 		{
 			file.close();
-			return FALSE;
+			return hRet;
 		}
 
 		auto buffer = new BYTE[static_cast<size_t>(fileSize)];
 		if (!buffer)
 		{
 			file.close();
-			return FALSE;
+			return hRet;
 		}
 
 		file.seekg(0, std::ios::beg);
@@ -408,14 +437,14 @@ namespace DllInject
 		if (pIDH->e_magic != IMAGE_DOS_SIGNATURE)
 		{
 			delete[] buffer;
-			return FALSE;
+			return hRet;
 		}
 
 		auto lpOldNtHeader = (PIMAGE_NT_HEADERS)((LPBYTE)buffer + pIDH->e_lfanew);
 		if (lpOldNtHeader->Signature != IMAGE_NT_SIGNATURE || !(lpOldNtHeader->FileHeader.Characteristics & IMAGE_FILE_DLL))
 		{
 			delete[] buffer;
-			return FALSE;
+			return hRet;
 		}
 		auto lpFileHeader = &lpOldNtHeader->FileHeader;
 		auto lpOptHeader = &lpOldNtHeader->OptionalHeader;
@@ -423,7 +452,7 @@ namespace DllInject
 		if (lpFileHeader->Machine != IMAGE_FILE_MACHINE)
 		{
 			delete[] buffer;
-			return FALSE;
+			return hRet;
 		}
 
 		auto lpTargetBase = (BYTE*)VirtualAllocEx(hproc, (LPVOID)lpOptHeader->ImageBase, lpOptHeader->SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -433,7 +462,7 @@ namespace DllInject
 			if(!lpTargetBase)
 			{
 				delete[] buffer;
-				return FALSE;
+				return hRet;
 			}
 		}
 
@@ -451,7 +480,7 @@ namespace DllInject
 				{
 					delete[] buffer;
 					VirtualFreeEx(hproc, lpTargetBase, lpOptHeader->SizeOfImage, MEM_RELEASE);
-					return false;
+					return hRet;
 				}
 			}
 		}
@@ -463,7 +492,7 @@ namespace DllInject
 			VirtualFreeEx(hproc, lpTargetBase, 0, MEM_RELEASE);
 			delete[] buffer;
 			VirtualFree(buffer, 0, MEM_RELEASE);
-			return false;
+			return hRet;
 		}
 
 		PIMAGE_SECTION_HEADER pISH = (PIMAGE_SECTION_HEADER)(lpOldNtHeader + 1);
@@ -477,7 +506,7 @@ namespace DllInject
 		{
 			VirtualFreeEx(hproc, lpTargetBase, 0, MEM_RELEASE);
 			delete[] buffer;
-			return 0;
+			return hRet;
 		}
 
 		MANUAL_INJECT manualInject = { 0 };
@@ -493,14 +522,14 @@ namespace DllInject
 		LPVOID loaderFunction = (LPVOID)((DWORD)loaderArgument + sizeof(MANUAL_INJECT));
 		WriteProcessMemory(hproc, loaderFunction, ManualMapInternalLoadDll, 0x1000 - sizeof(MANUAL_INJECT), 0); // Write the loader code to target process
 
-		StartRoutline(hproc, loaderFunction, loaderArgument, startMethod);
+		hRet = StartRoutline(hproc, loaderFunction, loaderArgument, startMethod);
 
 		delete[] buffer;
 		VirtualFreeEx(hproc, loaderArgument, 0x1000, MEM_RELEASE);
-		return TRUE;
+		return hRet;
 	}
 
-	inline BOOL InjectDll(HANDLE hProc, const inject_string& dllpath, InjectionMethod injectionMethod, StartMethod startMethod)
+	inline HMODULE InjectDll(HANDLE hProc, const inject_string& dllpath, InjectionMethod injectionMethod, StartMethod startMethod)
 	{
 		switch (injectionMethod)
 		{
