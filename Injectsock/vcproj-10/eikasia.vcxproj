@@ -77,6 +77,7 @@
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</LinkIncremental>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">eikn</TargetName>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">eikn</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -190,6 +191,8 @@
     </ClCompile>
     <ClCompile Include="..\src\modules\md5sum\md5.cpp" />
     <ClCompile Include="..\src\modules\md5sum\md5wrapper.cpp" />
+    <ClCompile Include="..\src\modules\Winsock Hook\FlvData.cpp" />
+    <ClCompile Include="..\src\modules\Winsock Hook\WebSocketData.cpp" />
     <ClCompile Include="..\src\modules\Winsock Hook\winsockhook.cpp">
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">CompileAsCpp</CompileAs>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">CompileAsCpp</CompileAs>
@@ -226,6 +229,8 @@
     <ClInclude Include="..\src\modules\md5sum\md5.h" />
     <ClInclude Include="..\src\modules\md5sum\md5wrapper.h" />
     <ClInclude Include="..\src\eikasia.h" />
+    <ClInclude Include="..\src\modules\Winsock Hook\FlvData.h" />
+    <ClInclude Include="..\src\modules\Winsock Hook\WebSocketData.h" />
     <ClInclude Include="..\src\userinfo.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>

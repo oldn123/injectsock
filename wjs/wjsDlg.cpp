@@ -49,7 +49,7 @@ END_MESSAGE_MAP()
 
 
 CwjsDlg::CwjsDlg(CWnd* pParent /*=NULL*/)
-	: CDialogEx(10, pParent)
+	: CDialogEx(IDD_DIALOG1, pParent)
 {
 //	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
@@ -71,7 +71,7 @@ END_MESSAGE_MAP()
 
 
 // CwjsDlg message handlers
-
+DWORD g_dwMod = 0;
 BOOL CwjsDlg::OnInitDialog()
 {
 	CDialogEx::OnInitDialog();
@@ -103,11 +103,37 @@ BOOL CwjsDlg::OnInitDialog()
 	SetIcon(m_hIcon, FALSE);		// Set small icon
 
 
+	g_dwMod = ((CwjsApp*)AfxGetApp())->DoInject();
 	 
 	// TODO: Add extra initialization here
 
 	return TRUE;  // return TRUE  unless you set the focus to a control
 }
+
+
+void CwjsDlg::OnDestroy()
+{
+	CDialogEx::OnDestroy();
+
+	if(!CwjsApp::RemoteEject())
+	{
+		AfxMessageBox("Ð¶ÔØÊ§°Ü");
+	}
+
+	// 	if (dwId)
+	// 	{
+	// 		HANDLE h = OpenProcess(PROCESS_ALL_ACCESS,false, dwId);
+	// 		
+	// 		if (pWnd)
+	// 		{
+	// 			pWnd->PostMessage(WM_CLOSE);
+	// 		}
+	// 		
+	// 		TerminateProcess(h, 0);
+	// 	}
+	// TODO: Add your message handler code here
+}
+
 
 void CwjsDlg::OnSysCommand(UINT nID, LPARAM lParam)
 {
@@ -158,11 +184,11 @@ HCURSOR CwjsDlg::OnQueryDragIcon()
 	return static_cast<HCURSOR>(m_hIcon);
 }
 
-extern DWORD DoInject();
 
 void CwjsDlg::OnBnClickedOk()
 {
-	DoInject();
+	OnOK();
+	//DoInject();
 }
 
 
@@ -179,24 +205,6 @@ void CwjsDlg::OnTimer(UINT_PTR nIDEvent)
 	CDialogEx::OnTimer(nIDEvent);
 }
 
-
-void CwjsDlg::OnDestroy()
-{
-	CDialogEx::OnDestroy();
-
-// 	if (dwId)
-// 	{
-// 		HANDLE h = OpenProcess(PROCESS_ALL_ACCESS,false, dwId);
-// 		
-// 		if (pWnd)
-// 		{
-// 			pWnd->PostMessage(WM_CLOSE);
-// 		}
-// 		
-// 		TerminateProcess(h, 0);
-// 	}
-	// TODO: Add your message handler code here
-}
 
 
 void CwjsDlg::OnHotKey(UINT nHotKeyId, UINT nKey1, UINT nKey2)

@@ -6,6 +6,7 @@
 #include <Assert.h>
 #include <process.h>
 #include <assert.h>
+
 //#include "HookApi.h"
 #include "mhook.h"
 //#include <openssl/rand.h>
@@ -19,12 +20,33 @@ using namespace std;
 #include "../../eikasia.h"
 #include "../../../rtmp/PacketOrderer.h"
 
+#include "FlvData.h"
+#include "WebSocketData.h"
+
+//定义16、32、64位的调位函数。这里就是字节“搬家”而已。
+#define SWAP16(s) ((((s)&0xff)<<8)|(((s)>>8)&0xff))
+
+#define SWAP32(l) (((l)>>24)|\
+	(((l)&0x00ff0000)>>8)|\
+	(((l)&0x0000ff00)<<8)|\
+	((l)<<24))
+
+#define SWAP64(ll) (((ll)>>56)|\
+	(((ll)&0x00ff000000000000)>>40)|\
+	(((ll)&0x0000ff0000000000)>>24)|\
+	(((ll)&0x000000ff00000000)>>8)|\
+	(((ll)&0x00000000ff000000)<<8)|\
+	(((ll)&0x0000000000ff0000)<<24)|\
+	(((ll)&0x000000000000ff00)<<40)|\
+	((ll)<<56)) 
+
 HINSTANCE g_hMod = NULL;
 
 enum MsgType {
 	eNodef,
 	eJionRoom,
 	eBegin,
+	eBegin2,
 	eResult
 };
 
@@ -50,26 +72,250 @@ struct DataFrame{
 	DataNode * pPopNode;
 };
 
-int g_nSleepStep = 200;
+int g_nSleepStep = 0;
 int g_msgCnt = 0;
 //CHookApi_Jmp g_hj;
 map<SOCKET, queue<DataFrame>> g_dataQueueMap;
-
+std::set<SOCKET> g_igCompSock;
 std::map<SOCKET, int> g_timerMap;
-
-
-std::map<SOCKET, MsgInfo> g_msgTypeMap;
+std::map<SOCKET, queue<pair<char*, int>>> g_lookatStream;
+std::map<SOCKET, queue<pair<char*, int>>> g_bufDelayMap;
+//std::map<SOCKET, MsgInfo> g_msgTypeMap;
 std::map<SOCKET, pair<char*, int>> g_startMap;
 std::map<SOCKET, pair<char*, int>> g_endMap;
 DWORD g_dwStartTime = 0;
 DWORD g_dwEndTime = 0;
 DWORD g_dwStartDelay = 0;
 DWORD g_dwEndDelay = 0;
+
+set<string> g_curWebSockHandleSet;
 //#define _TestMode
+SOCKET g_curFlvSock = 0;
+map<SOCKET, DWORD> g_dwLastFlvTimeMap;
 
 #ifdef _TestMode
 DWORD g_dwTestTick = 0;
 #endif
+
+
+class CFlvNotify : public CFlvStreamInterface
+{
+public:
+	virtual bool OnVideoHeaderCome(SOCKET s, unsigned int & nTimeStamp, int nDatalen){	
+		g_curFlvSock = s;
+		if (!g_curWebSockHandleSet.size())
+		{
+			return false;
+		}
+		int ntime = g_nSleepStep;
+		
+		if (g_timerMap[s] < 20000)
+		{
+			if (g_dwLastFlvTimeMap.count(s))
+			{
+				int nDiff = nTimeStamp - g_dwLastFlvTimeMap[s];
+				ntime = nDiff / 5; 
+			}
+
+			g_dwLastFlvTimeMap[s] = nTimeStamp;
+
+			Sleep(ntime);
+			g_timerMap[s] += ntime;
+			nTimeStamp+= g_timerMap[s];
+
+			char sBuf[60] = {0};
+			sprintf(sBuf, ">>> video---%d,%d\n", (int)nTimeStamp, g_timerMap[s]);
+		//	OutputDebugStringA(sBuf);
+
+// 			Sleep(10);
+// 			g_timerMap[s] += ntime;
+// 			nTimeStamp+= ntime;		
+		}
+		else
+		{		
+			nTimeStamp+= g_timerMap[s];
+		}
+		return true;
+	}
+
+	virtual bool OnAudioHeaderCome(SOCKET s, unsigned int & nTimeStamp, int nDatalen){
+		nTimeStamp += g_timerMap[s];	
+		return TRUE;
+	}
+};
+
+class CWSNotify : public CWSStreamInterface
+{
+public:
+	virtual bool OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, DWORD & nDelayTime);
+};
+
+CFlvNotify g_fn;
+CFlvData g_fd(&g_fn);
+
+CWSNotify g_wsn;
+CWebSocketData g_wsd(&g_wsn);
+SOCKET g_roomsock = 0;
+enum AgGameIdDef{
+	eRejectSvrIp	= 0x02008600,		// 00 86 00 02 00 00 00 0c 00 00 00 00
+	eJoinRoom		= 0x07200100,		// 0001200700000019
+	
+					//0x2f000200,
+	eBeginGame		= 0x0b000200,		// 821C0002000B0000001C00000000
+	eBeginGame2		= 0x35000200,
+	ePing3S_1		= 0x37000200,		// 每3秒一个
+	ePing3S_2		= 0x37000300,		// 每3秒一个
+	eEndGame		= 0x3A000200,
+	eEndGame1		= 0x19000300,
+	eDispchWiner	= 0x39000200,		//分配输赢
+
+	eGameResult		= 0x109a0400,
+	ePay			= 0x36000200,		//买入
+
+	eIgnoreMsg1		= 0x1c000200,
+	eIgnoreMsg2		= 0x14000200,
+	eIgnoreMsg3		= 0x36a00200,		//
+			//0x0fb00000
+			//0x10b10000
+			//0x26800000
+			//0x3a000200
+			//0x63000400
+};
+
+DWORD GetDelayTime()
+{
+	return g_curFlvSock ? g_timerMap[g_curFlvSock] : 0;
+}
+
+map<SOCKET, map<int ,int>> cntmap;
+char g_curRoomName[10] = {0};
+bool CWSNotify::OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, DWORD & nDelayTime){
+	int nCode = *(int*)&pData[noffset];
+	
+	char sText[100] = {0};
+	switch(nCode)
+	{
+	case eRejectSvrIp:
+		{
+			assert(nDatalen == 0xe);
+			sprintf(sText, ">>> [%x], 拒绝连接服务端\n", s);	
+		}
+		break;
+	case eJoinRoom:
+		{
+			memcpy(g_curRoomName, &pData[18], 4);
+			
+			sprintf(sText, ">>> [%x], 进入房间[%s]\n", s, g_curRoomName);	
+			g_roomsock = s;
+			string sSock;
+			g_wsd.GetAddressBySocket(s, sSock);
+			g_curWebSockHandleSet.insert(sSock);
+
+			nDelayTime = GetDelayTime();
+		}
+		break;
+	case ePay:
+		{
+			sprintf(sText, ">>> [%x], 玩家买入[%x]\n", s, nDatalen);	
+		}
+		break;
+	case eGameResult:
+		{
+			sprintf(sText, ">>> [%x], 游戏出结论[%x]\n", s, nDatalen);
+			//nDelayTime += 0x80000;
+		}
+		break;
+	case eBeginGame:
+		{
+			cntmap.clear();
+			cntmap[s][nCode] = 0;
+			char sRoundName[20] = {0};
+			memcpy(sRoundName, &pData[14], 14);
+			nDelayTime = GetDelayTime();
+			sprintf(sText, ">>> [%x], 已开局[%s]------------------------------------延时[%d]\n", s, sRoundName, nDelayTime);	
+		}
+		break;
+	case eBeginGame2:
+		{
+			char sName[10] = {0};
+			memcpy(sName, &pData[14], 4);
+			if (strcmp(g_curRoomName, sName) == 0/* && *(LPWORD)pData[0x13] == 0x1900*/)
+			{
+				nDelayTime = GetDelayTime();
+				sprintf(sText, ">>> [%x], 开始计时[%s][%x]------------------------------延时[%d]\n", s, sName, nDatalen,nDelayTime);		
+			}
+		}
+		break;
+	case eDispchWiner:
+		{
+			char sText1[20] = {0};
+			memcpy(sText1, &pData[14], 0x1e);
+			sprintf(sText, ">>> [%x], 分配输赢:[%s]\n", s, sText1);
+			//nDelayTime += 0x80000;
+		}
+		break;
+	case eEndGame:
+		{
+			sprintf(sText, ">>> [%x], 出结论--------size:%d\n", s, nDatalen);
+			//nDelayTime += 0x80000;
+		}
+		break;
+	case eEndGame1:
+		{
+			sprintf(sText, ">>> [%x], 出结论1-------size:%d\n", s, nDatalen);	
+			//nDelayTime += 0x80000;
+		}
+		break;
+	case ePing3S_1:
+		{
+			sprintf(sText, ">>> [%x], PING--1[%x]\n", s, nDatalen);	
+		}
+	case ePing3S_2:
+		{
+			sprintf(sText, ">>> [%x], PING--2[%x]\n", s, nDatalen);
+		}
+	case eIgnoreMsg1:
+	case eIgnoreMsg2:
+	case eIgnoreMsg3:
+		{		
+			strcpy(sText, "");
+			//sprintf(sText, ">>> [%x], 忽略-------size:%d\n", s, nDatalen);
+			//nDelayTime += 3000;
+			//nDelayTime += 0x80000;
+		}
+		break;
+	default:
+		{
+	
+		}
+	}
+	//nDelayTime = 0;
+//	if (cntmap.size())
+	if (g_roomsock && g_roomsock != s)
+	{
+	//	nDelayTime += 0x80000;
+	}
+//	if (g_roomsock == s)
+	{
+		{
+			cntmap[s][nCode]++;
+			if (strlen(sText) == 0)
+			{
+				//sprintf(sText, ">>> [%x] 0x%x--[%x]--[%d]\n", s, nCode, nDatalen, cntmap[s][nCode]);
+			}		
+		}
+
+
+		{
+			if (strlen(sText) > 0)
+			{
+				OutputDebugStringA(sText);
+			}
+		}		
+	}
+	
+	return true;
+}
 
 typedef int (WINAPI *PCONNECT)(SOCKET s, const struct sockaddr *address, int namelen);
 typedef int (WINAPI *PGETHOSTBYNAME)(const char *name);
@@ -92,19 +338,20 @@ typedef int (WINAPI *PMakeWindow) (int window);
 typedef int (WINAPI *PLoginWindow) (int a, int b);
 */
 PSOCKET	OrigSocket = socket;
-PCONNECT OrigConnect = connect;
 PSEND OrigSend = send;
 PSENDTO	OrigSendTo = sendto;
 PWSASEND OrigWSASend;
 PWSARECV OrigWSARecv;
 PGETHOSTBYNAME OrigGethost;
 
+PCONNECT OrigConnect = (PCONNECT)
+	GetProcAddress(GetModuleHandle("Ws2_32.dll"), "connect");
+
 PRECV OrigRecv  = (PRECV)
 	GetProcAddress(GetModuleHandle("Ws2_32.dll"), "recv");
 
 PCLOSESOCKET OrigClosesocket = (PCLOSESOCKET)
 	GetProcAddress(GetModuleHandle("Ws2_32.dll"), "closesocket");
-
 
 /*
 PGRFREADER OrigGrfReader;
@@ -128,15 +375,44 @@ SYSTEMTIME st;
 
 //===========================Socket===========================
 SOCKET WINAPI MySocket(int af, int type, int protocol) {
-	return OrigSocket(af, type, protocol);
+	SOCKET s = OrigSocket(af, type, protocol);
+	char sOut[100] = {0};
+	sprintf(sOut, ">>> +++++++++++ sock-creat:0x%x\n", s);
+	OutputDebugStringA(sOut);
+	return s;
 }
 
+
 int WINAPI MyClosesocket (SOCKET s) {
+	char sOut[100] = {0};
+	sprintf(sOut, ">>> ----------- sock-close:0x%x\n", s);
+	OutputDebugStringA(sOut);
+
+	assert(s != g_roomsock);
+
 	int nret = OrigClosesocket(s);
 	if (g_timerMap.count(s))
 	{
 		g_timerMap.erase(s);
 	}
+
+	if (g_curFlvSock == s)
+	{
+		g_curFlvSock = 0;
+	}
+
+	if (g_igCompSock.count(s))
+	{
+		g_igCompSock.erase(s);
+	}
+
+	if (g_dwLastFlvTimeMap.count(s))
+	{
+		g_dwLastFlvTimeMap.erase(s);
+	}
+	g_wsd.OnCloseHandle((void*)s);
+	g_fd.OnCloseHandle((void*)s);
+
 	return nret;
 }
 /*
@@ -223,18 +499,7 @@ void hextostr(char *ptr,unsigned char *buf,int len)
 MsgType GetMsgType(SOCKET s, char * pBuf, int nlen)
 {
 	MsgType mt = eNodef;
-	if (g_msgTypeMap.count(s))
-	{
-		mt = g_msgTypeMap.at(s).mt;
-		g_msgTypeMap[s].nRecvlen += nlen;
-		if (g_msgTypeMap[s].nRecvlen >= g_msgTypeMap[s].nTotalLen)
-		{
-			g_msgTypeMap.erase(s);
-		}
-		return mt;
-	}
-
-	int noffset = 4;
+	int noffset = 0;
 	
 	do 
 	{
@@ -252,27 +517,33 @@ MsgType GetMsgType(SOCKET s, char * pBuf, int nlen)
 			break;
 		}
 
-		char strStart[] = "{\"pack_type\":5,\"data\":{";
-		if(memcmp((char*)&pBuf[noffset], strStart, strlen(strStart)) == 0)
 		{
-			mt = eBegin;
-			break;
+			char sRoomName[10] = {0};
+			char sRoundName[20] = {0};
+			BYTE sbegin[14] = {0x82,0x20,0x00,0x02,0x10,0x1B,0x00,0x00,0x00,0x20,0,0,0,0};
+
+			if(memcmp((char*)&pBuf[noffset], sbegin, 14) == 0)
+			{
+				memcpy(sRoomName, &pBuf[14], 4);
+				memcpy(sRoundName, &pBuf[18], 14);
+				mt = eBegin;
+				break;
+			}
+		}
+
+		{
+			//821C0002000B0000001C00000000
+			char sRoundName[20] = {0};
+			BYTE sbegin[14] = {0x82,0x1C,0x00,0x02,0x00,0x0B,0x00,0x00,0x00,0x1C,0,0,0,0};
+			if(memcmp((char*)&pBuf[noffset], sbegin, 14) == 0)
+			{
+				memcpy(sRoundName, &pBuf[14], 14);
+				mt = eBegin2;
+				break;
+			}
 		}
 	} while (0);
-	
-	if (mt != eNodef)
-	{
-		int nMsgLen = (BYTE)pBuf[2];
-		nMsgLen <<= 8;
-		nMsgLen |= (BYTE)pBuf[3];
 
-		if (nlen < nMsgLen)
-		{
-			g_msgTypeMap[s].mt = mt;
-			g_msgTypeMap[s].nTotalLen = nMsgLen;
-			g_msgTypeMap[s].nRecvlen = nlen - 4;
-		}
-	}
 
 	return mt;
 }
@@ -288,243 +559,280 @@ bool ReplaceBuf(char * pSrcBuf, char * strFind, char * strRep)
 	return false;
 }
 
+int FindData(LPBYTE pData, int nDataSize, LPBYTE pFind, int nFindSize)
+{
+	int nFindIdx = -1;
+	for (int i = 0; i < nDataSize - nFindSize; i++)
+	{
+		if(memcmp(&pData[i], pFind, nFindSize) == 0)
+		{
+			nFindIdx = i;
+			i += nFindSize;
+		}
+	}
+	return nFindIdx >= 0;
+}
 
-//===========================RECV===========================
-int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
+int WINAPI __stdcall FakeRecv(SOCKET s, const char* buf, int len, int flags)
 {
 	int RecvedBytes = 0;
-	//g_hj.SetHookOff("recv");	
+
 	RecvedBytes = OrigRecv(s, (char*)buf, len, flags);
-	//g_hj.SetHookOn("recv");
 
 	if(RecvedBytes == SOCKET_ERROR)
 	{
-		if (g_timerMap.size())
-		{
-			if (g_startMap.count(s) && g_dwStartTime != 0 && g_dwStartDelay != 0)
-			{
-				if (GetTickCount() - g_dwStartTime >= g_dwStartDelay - g_dwStartDelay / 4)
-				{
-					int realret = g_startMap[s].second;
-					memcpy((void*)buf, g_startMap[s].first, realret);
-					delete [] g_startMap[s].first;
-					g_startMap.erase(s);
-					return realret;
-				}
-			}
-
-			if (g_endMap.count(s) && g_dwEndTime != 0 && g_dwEndDelay != 0)
-			{
-				if (GetTickCount() - g_dwEndTime >= g_dwEndDelay - g_dwEndDelay / 4)
-				{
-					int realret = g_endMap[s].second;
-					memcpy((void*)buf, g_endMap[s].first, realret);
-					delete [] g_endMap[s].first;
-					g_endMap.erase(s);
-					return realret;
-				}
-			}
-		}
-	}
-
-	if(RecvedBytes == SOCKET_ERROR) return RecvedBytes;
-
-	bool bVideoMsg = len >= 8 && GetRtmpPacketType((unsigned char*)buf) == RtmpPacket::Video;
-	if (bVideoMsg)
-	{
-		if (!g_timerMap.count(s))
-		{
-			g_timerMap[s] = 0;
-		}
-
-		if (g_timerMap[s] >= 20 * 1000)
-		{
-			return RecvedBytes;
-		}
-
-		int ntime = (buf[1] << 16) | (buf[2] << 8) | buf[3];
-
-		ntime += g_nSleepStep;
-		Sleep(g_nSleepStep);
-		g_timerMap[s] += g_nSleepStep;
-
-		((char*)buf)[1] = (char)((ntime >> 16) & 0xff);
-		((char*)buf)[2] = (char)((ntime >> 8) & 0xff);
-		((char*)buf)[3] = (char)(ntime & 0xff);
+// 		char __buf[0x8000] = {0};
+// 		int nRet = g_wsd.ReadDelayData((void*)s, (char*)buf, len);
+// 
+// 		if (nRet >= 0)
+// 		{
+// 			memcpy((void*)&buf[0], __buf, nRet);
+// 			char sBuf[120] = {0};
+// 			sprintf(sBuf, ">>> fake ret1: %d\n", nRet);
+// 			OutputDebugStringA(sBuf);
+// 			return nRet;
+// 		}
+		return RecvedBytes;
 	}
 	else
 	{
-		MsgType mt = GetMsgType(s, (char*)buf, RecvedBytes);
-		switch(mt)
-		{
-		case eBegin:
-			{
-				if (g_timerMap.size())
-				{
-					char * pdata = new char[RecvedBytes];
-					memcpy(pdata, buf, RecvedBytes);
-					g_startMap[s] = make_pair(pdata, RecvedBytes);
-					g_dwStartTime = GetTickCount();
-					g_dwStartDelay = g_timerMap.begin()->second;
-					memset((void*)&buf[0], 0, len);
-					return 6;
-				}
-				return RecvedBytes;
-			}
-			break;
-		case eResult:
-			{
-				if (g_timerMap.size())
-				{
-					char * pdata = new char[RecvedBytes];
-					memcpy(pdata, buf, RecvedBytes);
-					g_endMap[s] = make_pair(pdata, RecvedBytes);
-					g_dwEndTime = GetTickCount();
-					g_dwEndDelay = g_timerMap.begin()->second;
-					memset((void*)&buf[0], 0, len);
-					return 6;
-				}
-				return RecvedBytes;
-			}
-			break;
-		case eJionRoom:
-			{
+		char sFile[100] = {0};
+		sprintf(sFile, "d:\\data\\s_%x.dat", s);
+		FILE * fp = fopen(sFile, "ab");
+		fwrite(&buf[0], 1, RecvedBytes, fp);
+		fclose(fp);
+	}
 
-			}
-			break;
+	if(!g_fd.OnRecvData((void*)s, (char*)buf, RecvedBytes))
+	{
+		//非flv
+		DWORD dwDiff = 0;
+		string sSock;
+		g_wsd.GetAddressBySocket(s, sSock);
+		int am;	//CWebSocketData::AlignMode 
+		if(g_wsd.OnRecvData((void*)s, (char*)buf, RecvedBytes, len, am))
+		{	
+// 			assert(len);
+// 			char __buf[0x8000] = {0};
+// 			int nRet = g_wsd.ReadDelayData((void*)s, (char*)__buf, len);
+// 			if (nRet >= 0)
+// 			{
+// 				assert(memcmp((void*)&buf[0], __buf, nRet) == 0);
+// 				
+// 				memcpy((void*)&buf[0], __buf, nRet);
+// 				char sBuf[120] = {0};
+// 				sprintf(sBuf, ">>> fake ret2:0x%x,  src ret:0x%x, want:0x%x\n", nRet, RecvedBytes, len);
+// 				OutputDebugStringA(sBuf);
+// 				return nRet;
+// 			}
+// 
+// 
+// 			char sBuf[120] = {0};
+// 			sprintf(sBuf, ">>> [%x]fake 屏蔽消息 size: %d\n", s, RecvedBytes);
+// 			OutputDebugStringA(sBuf);
+// 			//if (g_curWebSockHandleSet.count(sSock))
+// 			{
+// 				memset((void*)&buf[0], 0, RecvedBytes);
+// 				WSASetLastError(WSAETIMEDOUT);
+// 				SetLastError(WSAETIMEDOUT);
+// 				return -1;	
+// 			}
 		}
 
-
-		bool bJson = ((buf[0] & 0xc0) >> 6) == 2 && buf[4] == '{';
-		if (bJson)
+		if (am != 0)
 		{
-			char soutput[150] = {0};
-			strcat(soutput, ">>> ");
-			memcpy(&soutput[4], &buf[4], RecvedBytes - 4 > 140 ? 140 : RecvedBytes - 4);
-			strcat(soutput, "\n");
-			OutputDebugStringA(soutput);
+			g_wsd.ReadDelayData((void*)s, (char*)buf, RecvedBytes, len, am);
 		}
 	}
 
 	return RecvedBytes;
-	
-	
-// 	map<SOCKET, queue<DataFrame>> & dqm = g_dataQueueMap;
-// 	queue<DataFrame> & dnQueue = dqm[s];
-// 
-// 	int nRecLen = RecvedBytes;
-// 	bool bNeedRecvData = false;
-// 	DataNode * _pdn = NULL;
-// 	if (dnQueue.size() > 0)
+}
+
+//===========================RECV===========================
+int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
+{	
+	int RecvedBytes = FakeRecv(s, buf, len, flags);
+
+// 	if (s == g_roomsock)
 // 	{
-// 		DataFrame & df = dnQueue.back();
-// 		if(df.nGetSize < df.nTotalSize)
+// 		return -1;
+// 	}
+
+// 	char soutput[150] = {0};
+// 	sprintf(soutput, ">>> [%x]fakeRecv ret: 0x%x want:0x%x", s, RecvedBytes, len);
+// 	OutputDebugStringA(soutput);
+
+// 	BOOL bDelayOK = FALSE;
+// 
+// 	if (!g_timerMap.count(s))
+// 	{
+// 		if (memcmp(buf, sFlvSign, 13) == 0 || (memcmp(buf, "HTTP/", 5) == 0) && strstr(buf, "Content-Type: video/x-flv") != NULL)
 // 		{
-// 			df.nGetSize += nRecLen;
-// 			if (df.nGetSize > df.nTotalSize)
-// 			{
-// 				nRecLen -= df.nGetSize - df.nTotalSize;
-// 				assert(0);
-// 			}
-// 			_pdn = df.pNode;
+// 			OutputDebugStringA(">>> get flv flag~~~~~~~~~");
+// 			g_timerMap[s] = 0;
+// 			g_nLessRecvLen = 0;
 // 		}	
 // 	}
 // 
-// 	if (_pdn)
-// 	{
-// 		//补充数据节点
-// 		DataNode * pdn = NULL;
-// 		while(1)
+// 	if (g_timerMap.count(s))
+// 	{	
+// 		char * _strBuf = (char*)buf;
+// 		int nRecvBytes = RecvedBytes;
+// 		int _noffset = 0;
+// 		do 
 // 		{
-// 			if(_pdn)
+// 			if (g_timerMap[s] >= 20 * 1000)
 // 			{
-// 				pdn = _pdn;
-// 				_pdn = _pdn->pNext;
+// 				return RecvedBytes;
+// 			}
+// 			_strBuf += _noffset;
+// 			_noffset = 0;
+// 			if (_strBuf[8] == 0 && _strBuf[9] == 0 && _strBuf[10] == 0)
+// 			{
+// 				unsigned int nDataLen = 0;
+// 				nDataLen |= ((((unsigned int)_strBuf[1]) << 16) & 0xFF0000);
+// 				nDataLen |= ((((unsigned int)_strBuf[2]) << 8) & 0xFF00);
+// 				nDataLen |= (unsigned char)_strBuf[3];
+// 				g_nLastPackageLen = nDataLen;
+// 
+// 
+// 				if (_strBuf[0] == 0x09)
+// 				{//video
+// 					
+// 					ProcVideoBuf(s, _strBuf);
+// 					bDelayOK = TRUE;
+// 				}	
+// 			
+// 				if (g_nLastPackageLen > nRecvBytes + g_nLessRecvLen)
+// 				{
+// 					g_nLessRecvLen = nDataLen - nRecvBytes + 11;
+// 				}
+// 				else
+// 				{
+// 					nRecvBytes -= (nDataLen + 11);
+// 					_noffset += (nDataLen + 11);
+// 					_noffset += 4;
+// 					g_nLessRecvLen = 0;
+// 					continue;
+// 				}
 // 			}
 // 			else
 // 			{
+// 				if (g_nLessRecvLen > 0)
+// 				{
+// 					if (g_nLessRecvLen > nRecvBytes)
+// 					{
+// 						g_nLessRecvLen -= nRecvBytes ;
+// 						break;
+// 					}
+// 					else
+// 					{
+// 						nRecvBytes -= (g_nLessRecvLen + 11);
+// 						_noffset += (g_nLessRecvLen + 11);
+// 
+// 						if (ntohl(*(int*)&_strBuf[_noffset]) != g_nLastPackageLen + 11)	//长度校验
+// 						{
+// 							MessageBox(0, "数据长度校验错误", "", 0);
+// 							break;
+// 						}	
+// 						_noffset += 4;
+// 						g_nLessRecvLen = 0;
+// 						continue;
+// 					}
+// 				}
+// 				else
+// 				{
+// 					break;
+// 				}
+// 			}
+// 
+// 			if(g_nLessRecvLen > 0)
+// 			{
 // 				break;
 // 			}
-// 		}
-// 		pdn->pNext = new DataNode;
-// 		pdn->pNext->nIdx = g_msgCnt++;
-// 		pdn->pNext->nSize = nRecLen;
-// 		pdn->pNext->pBuf = new char[nRecLen];
-// 		memcpy(pdn->pNext->pBuf, buf, pdn->pNext->nSize);
-// 		pdn->pNext->pNext = NULL;	
+// 		} while (TRUE);
 // 	}
-// 	else
+
+
+
+// 	if (!bDelayOK)
 // 	{
-// 		bool bVideoMsg = len >= 8 && GetRtmpPacketType((unsigned char*)buf) == RtmpPacket::Video;
-// 		if (!bVideoMsg)
+// 		bool bVideoMsg = len >= 8 && (GetRtmpPacketType((unsigned char*)buf) == RtmpPacket::Video);
+// 		if (bVideoMsg && !bDelayOK)
 // 		{
-// 			return RecvedBytes;
+// 			if (!g_timerMap.count(s))
+// 			{
+// 				g_timerMap[s] = 0;
+// 			}
+// 
+// 			if (g_timerMap[s] >= 20 * 1000)
+// 			{
+// 				return RecvedBytes;
+// 			}
+// 
+// 			int ntime = (buf[4] << 16) | (buf[5] << 8) | buf[6];
+// 			ntime += g_nSleepStep;
+// 			Sleep(g_nSleepStep);
+// 			g_timerMap[s] += g_nSleepStep;
+// 
+// 
+// 			((char*)buf)[4] = (char)((ntime >> 16) & 0xff);
+// 			((char*)buf)[5] = (char)((ntime >> 8) & 0xff);
+// 			((char*)buf)[6] = (char)(ntime & 0xff);
 // 		}
 // 		else
 // 		{
-// 			DataFrame df;
-// 			df.nLoop = 0;
-// 			df.pNode = new DataNode;
-// 			df.pPopNode = df.pNode;
-// 			df.nGetSize = nRecLen;
+// 			MsgType mt = GetMsgType(s, (char*)buf, RecvedBytes);
+// 			switch(mt)
+// 			{
+// 			case eResult:
+// 				{
+// 					if (g_timerMap.size())
+// 					{
+// 						char * pdata = new char[RecvedBytes];
+// 						memcpy(pdata, buf, RecvedBytes);
+// 						g_endMap[s] = make_pair(pdata, RecvedBytes);
+// 						g_dwEndTime = GetTickCount();
+// 						g_dwEndDelay = g_timerMap.begin()->second;
+// 						memset((void*)&buf[0], 0, len);
+// 						return 6;
+// 					}
+// 					return RecvedBytes;
+// 				}
+// 				break;
+// 			case eJionRoom:
+// 				{
 // 
-// 			unsigned char totalExpected_byte0 = *(buf + 4);	
-// 			unsigned char totalExpected_byte1 = *(buf + 5);
-// 			unsigned char totalExpected_byte2 = *(buf + 6);
-// 
-// 			int totalExpected = (totalExpected_byte0 << 16) | (totalExpected_byte1 << 8) | totalExpected_byte2 + 8;
-// 			// add in extra chunk delimiters
-// 			totalExpected += totalExpected/128;
-// 
-// 			df.nTotalSize = totalExpected;
+// 				}
+// 				break;
+// 			}
 // 
 // 
-// 			df.pNode->nIdx = g_msgCnt++;
-// 			df.pNode->nSize = nRecLen;
-// 			df.pNode->pBuf = new char[nRecLen];
-// 			memcpy(df.pNode->pBuf, buf, df.pNode->nSize);
-// 			df.pNode->pNext = NULL;
-// 
-// 			dnQueue.push(df);
+// 			bool bJson = ((buf[0] & 0xc0) >> 6) == 2 && buf[4] == '{';
+// 			if (bJson)
+// 			{
+// 				char soutput[150] = {0};
+// 				strcat(soutput, ">>> ");
+// 				memcpy(&soutput[4], &buf[4], RecvedBytes - 4 > 140 ? 140 : RecvedBytes - 4);
+// 				strcat(soutput, "\n");
+// 				OutputDebugStringA(soutput);
+// 			}
 // 		}
-// 	}
-// 
-// 	//>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-// 
-// 	DataNode *pdn = NULL;
-// 	if (dnQueue.size() && g_msgCnt > 1)
-// 	{
-// 		DataFrame & df = dnQueue.front();
-// 		pdn = df.pPopNode;
-// 		df.pPopNode = df.pPopNode->pNext;
-// 		if (df.pPopNode == NULL)
-// 		{
-// 			df.pPopNode = df.pNode;
-// 			df.nLoop++;
-// 		}
-// 		memset((char*)buf, 0, len);
-// 		memcpy((char*)buf, pdn->pBuf, pdn->nSize);
-// 		RecvedBytes = pdn->nSize;
-// 
-// 		if (df.nLoop > 1)
-// 		{
-// 			ReleaseDf(df);
-// 			dnQueue.pop();
-// 		}
-// 	}
-// 
-// 	char stext[80] = {0};
-// 	sprintf(stext, "####! recv: %d\n", RecvedBytes);
-// 	OutputDebugStringA(stext);
+	//}
+
 
 	return RecvedBytes;
+
 }
 
 //===========================CONNECT===========================
 int WINAPI __stdcall MyConnect(SOCKET s, const struct sockaddr *address, int namelen)
 {
+	sockaddr_in sin;
+	memcpy(&sin, address, sizeof(sin));
+
 	char stext[80] = {0};
-	sprintf(stext, "####! connect: %d\n", address->sa_data);
+	sprintf(stext, ">>> [0x%x] connect: %s:%d\n",s, inet_ntoa(sin.sin_addr), ntohs(sin.sin_port));
 	OutputDebugStringA(stext);
 
 	int errors = OrigConnect(s, address, namelen);
@@ -779,8 +1087,12 @@ bool WINAPI EnableHook(BOOL bHook)
 		if (Mhook_SetHook((PVOID*)&OrigClosesocket, MyClosesocket)) {		
 			n++;
 		}
+
+		if (Mhook_SetHook((PVOID*)&OrigConnect, MyConnect)) {		
+			n++;
+		}
 		
-		if (n == 2)
+		if (n == 3)
 		{
 			OutputDebugStringA(">>> EnableHook(1) ret true");
 		}
@@ -799,13 +1111,20 @@ bool WINAPI EnableHook(BOOL bHook)
 			n++;
 		}
 
+		if (Mhook_Unhook((PVOID*)&OrigConnect)) {		
+			n++;
+		}
+
 		OrigRecv  = (PRECV)
 			GetProcAddress(GetModuleHandle("Ws2_32.dll"), "recv");
 
 		OrigClosesocket = (PCLOSESOCKET)
 			GetProcAddress(GetModuleHandle("Ws2_32.dll"), "closesocket");
+
+		OrigConnect = (PCONNECT)
+			GetProcAddress(GetModuleHandle("Ws2_32.dll"), "connect");
 		
-		if (n == 2)
+		if (n == 3)
 		{
 			OutputDebugStringA(">>> EnableHook(0) ret true");
 		}
@@ -860,7 +1179,7 @@ void WINAPI WinsockHook(HINSTANCE hInst)
 	
 	OutputDebugStringA(">>> 123");
 
-	//EnableHook(TRUE);
+	EnableHook(TRUE);
 
 	OutputDebugStringA(">>> 456");
 }

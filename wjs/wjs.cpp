@@ -13,6 +13,7 @@
 #pragma comment(lib, "..\\release\\finder.lib")
 #endif
 
+#define TestMode
 
 DWORD dwId = 0;
 HWND hWndGame = NULL;
@@ -97,54 +98,22 @@ CwjsApp::CwjsApp()
 
 CwjsApp theApp;
 
+HMODULE g_hMod = 0;
+DWORD g_dwPid = 0;
 
-
-BOOL RemoteEject(DWORD dwProcessID, HMODULE hModule)
+BOOL CwjsApp::RemoteEject()
 {
-	BOOL bRetCode = FALSE;
-	HANDLE hProcess = NULL;
-	HANDLE hThread = NULL;
-
-	PTHREAD_START_ROUTINE pfnThreadRoutine;
-
-	do
+	if (g_hMod)
 	{
-		//获得想要注入代码的进程的句柄
-		hProcess = ::OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwProcessID);
-		if (hProcess == NULL)
-			break;
-
-		//获得LoadLibraryA在Kernel32.dll中的真正地址
-		pfnThreadRoutine = (PTHREAD_START_ROUTINE)::GetProcAddress(GetModuleHandle(TEXT("Kernel32")), "FreeLibraryA");
-		if (pfnThreadRoutine == NULL)
-			break;
-
-		//创建远程线程，并通过远程线程调用用户的DLL文件
-		hThread = ::CreateRemoteThread(hProcess, NULL, 0, pfnThreadRoutine, (LPVOID)hModule, 0, NULL);
-		if (hThread == NULL)
-			break;
-
-		//等待远程线程终止
-		::WaitForSingleObject(hThread, INFINITE);
-	}while(FALSE);
-
-	if (hThread != NULL)
-	{
-		DWORD dwExitCode;
-		::GetExitCodeThread(hThread, &dwExitCode);
-		bRetCode = (BOOL)dwExitCode;
-		::CloseHandle(hThread);
+		return EjectDll(g_dwPid, g_hMod);
 	}
-	if (hProcess != NULL)
-	{
-		::CloseHandle(hProcess);
-	}
-	return bRetCode;
+	return FALSE;
 }
 
+//#define GemeTitle "维加斯"
+#define GemeTitle "Asia Game VIP"
 
-
-DWORD DoInject()
+DWORD CwjsApp::DoInject()
 {
 	// TODO: Add your control notification handler code here
 	do 
@@ -154,20 +123,23 @@ DWORD DoInject()
 			hWndGame = NULL;
 		}
 
-		//hWndGame = FindWindow(NULL, "维加斯 - Google Chrome");
 		if (!hWndGame)
-		{
-			hWndGame = FindWindow("Chrome_WidgetWin_1", NULL);
+		{	
+			CString sTitle = GemeTitle;
+			sTitle += " - Google Chrome";
+			hWndGame = FindWindow(NULL, sTitle);
 		}
 		if(!hWndGame)
 		{
-			hWndGame = FindWindow(NULL, "维加斯 - 360安全浏览器 8.0");
-			//	pWnd = FindWindow("360se6_Frame", NULL);
+			CString sTitle = GemeTitle;
+			sTitle += " - 360安全浏览器 8.0";
+			hWndGame = FindWindow(NULL, sTitle);
 		}
 		if(!hWndGame)
 		{
-			hWndGame = FindWindow(NULL, "维加斯 - 360安全浏览器 8.1");
-			//	pWnd = FindWindow("360se6_Frame", NULL);
+			CString sTitle = GemeTitle;
+			sTitle += " - 360安全浏览器 8.1";
+			hWndGame = FindWindow(NULL, sTitle);
 		}
 
 		if (hWndGame)
@@ -182,8 +154,10 @@ DWORD DoInject()
 				CString sName = sFile.Right(sFile.GetLength() - sFile.ReverseFind('\\'));
 				sFile.Replace((LPCTSTR)sName, "\\eikn.dll");
 
-				if(InjectDll(dwId, sFile, LoadLib, ThreadHijacking))
+				g_hMod = InjectDll(dwId, sFile, LoadLib, ThreadHijacking);
+				if(g_hMod)
 				{
+					g_dwPid = dwId;
 					break;
 				}
 				dwId = 0;
@@ -224,8 +198,6 @@ CString GetHostbyName(const char * HostName)
 	return strIPAddress;
 }
 
-DWORD g_dwPid = 0;
-
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -238,7 +210,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			{
 				if (!hWndGame || !IsWindow(hWndGame))
 				{
-					g_dwPid = DoInject();
+					g_dwPid = CwjsApp::DoInject();
 				}
 				else
 				{
@@ -378,11 +350,6 @@ BOOL CwjsApp::InitInstance()
 	// such as the name of your company or organization
 	SetRegistryKey(_T("Local AppWizard-Generated Applications"));
 
-	CString sIp = GetHostbyName("qqyonghu888.3322.org");
-	if (sIp != "192.168.1.140")
-	{
-		return FALSE;
-	}
 
 #ifdef TestMode
 
@@ -400,6 +367,13 @@ BOOL CwjsApp::InitInstance()
 		//  dismissed with Cancel
 	}
 #else
+
+	CString sIp = GetHostbyName("qqyonghu888.3322.org");
+	if (sIp != "192.168.1.140")
+	{
+		return FALSE;
+	}
+
 	DoCreateWnd(AfxGetInstanceHandle());
 
 	g_dwPid = DoInject();
