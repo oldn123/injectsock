@@ -1,6 +1,7 @@
 #include "WebSocketData.h"
 #include <stdio.h>
 #include <memory>
+#include <stack>
 #include <assert.h>
 //Opcode类型
 #define OPCODE_TEXT      1
@@ -12,6 +13,29 @@
 #define DATA_CONTINUE    0
 #define DATA_FINAL       1
 
+bool TestInsertPackage(char * pInputData, int& nLen, int nMax, char * pInsert, int nInsLen, int am)
+{
+	if (nLen + nInsLen > nMax || am == 0)
+	{
+		return false;
+	}
+
+	if ((am & CWebSocketData::eEnd) == CWebSocketData::eEnd)
+	{
+		nLen += nInsLen;
+	}
+	else
+		if ((am & CWebSocketData::eBegin) == CWebSocketData::eBegin)
+		{
+			nLen += nInsLen;
+		}
+		else
+		{
+			assert(0);
+			return false;
+		}
+		return true;
+}
 
 bool InsertPackage(char * pInputData, int& nLen, int nMax, char * pInsert, int nInsLen, int am)
 {
@@ -46,19 +70,21 @@ bool InsertPackage(char * pInputData, int& nLen, int nMax, char * pInsert, int n
 
 bool CWebSocketData::_GetAddressBySocket(SOCKET s, string & sSock)
 {
-	SOCKADDR_IN addr;
-	memset(&addr, 0, sizeof(addr));
-	int nAddrLen = sizeof(addr);
-
-	//根据套接字获取地址信息
-	if(::getpeername(s, (SOCKADDR*)&addr, &nAddrLen) != 0)
-	{
-		assert(0);
-		return false;
-	}
+// 
+// 	SOCKADDR_IN addr;
+// 	memset(&addr, 0, sizeof(addr));
+// 	int nAddrLen = sizeof(addr);
+// 
+// 	//根据套接字获取地址信息
+// 	if(::getpeername(s, (SOCKADDR*)&addr, &nAddrLen) != 0)
+// 	{
+// 		assert(0);
+// 		return false;
+// 	}
 
 	char sBuf[50] = {0};
-	sprintf(sBuf, "%d.%d.%d.%d:%d", addr.sin_addr.S_un.S_un_b.s_b1,addr.sin_addr.S_un.S_un_b.s_b2,addr.sin_addr.S_un.S_un_b.s_b3,addr.sin_addr.S_un.S_un_b.s_b4, addr.sin_port);
+	sprintf(sBuf, "0x%x", s);
+//	sprintf(sBuf, "%d.%d.%d.%d:%d", addr.sin_addr.S_un.S_un_b.s_b1,addr.sin_addr.S_un.S_un_b.s_b2,addr.sin_addr.S_un.S_un_b.s_b3,addr.sin_addr.S_un.S_un_b.s_b4, addr.sin_port);
 	sSock = sBuf;
 	return true;
 }
@@ -93,6 +119,10 @@ CWebSocketData::DataInfo * CWebSocketData::FixRemoveMsg( void * s, char * pData,
 		DataInfo * pdi = m_removeMap[sSock];
 		if(InsertPackage(pData, nLen, maxLen, pdi->pData, pdi->nPackageLen - pdi->nLessBufLen, CWebSocketData::eBegin))
 		{
+			char sOut[100] = {0};
+			sprintf(sOut, ">>> 强行恢复%d个字节-成功\n", pdi->nPackageLen - pdi->nLessBufLen);
+			OutputDebugStringA(sOut);
+
 			pdi->nLessBufLen = pdi->nPackageLen; //修复值
 
 			m_removeMap.erase(sSock);
@@ -100,6 +130,10 @@ CWebSocketData::DataInfo * CWebSocketData::FixRemoveMsg( void * s, char * pData,
 		}
 		else
 		{
+			char sOut[100] = {0};
+			sprintf(sOut, ">>> 强行恢复%d个字节-失败\n", pdi->nPackageLen - pdi->nLessBufLen);
+			OutputDebugStringA(sOut);
+
 			return nullptr;
 		}
 	}
@@ -252,6 +286,8 @@ int CWebSocketData::ReadDelayData(void * s, char * pData, int& nLen, int maxLen,
 	int sended = 0;
 	if (lmap.count(sSock))
 	{
+		stack<DataInfo *> tmpDataStack;
+		int nTestLen = nLen;
 		do 
 		{
 			if (lmap[sSock].size() > 0)
@@ -260,8 +296,8 @@ int CWebSocketData::ReadDelayData(void * s, char * pData, int& nLen, int maxLen,
 				if ((int)(GetTickCount() - iter->dwPushTime) >= (int)iter->dwNeedDelay)
 				{
 					int nsz = (iter->nPackageLen - iter->nLessBufLen) - iter->nPopLen;
-					if(InsertPackage(pData, nLen, maxLen, &iter->pData[iter->nPopLen], nsz, am))
-					{
+					if(TestInsertPackage(pData, nLen, maxLen, &iter->pData[iter->nPopLen], nsz, am))
+					{		
 						char sOut[100] = {0};
 						sprintf(sOut, ">>> [%x]恢复+++++++++++++++++++++++++++++++++++++++++++++++++++++++++Idx:%d, 时间间隔:%d\n", s, iter->nIdx, (int)iter->dwNeedDelay);
 						OutputDebugStringA(sOut);
@@ -269,8 +305,7 @@ int CWebSocketData::ReadDelayData(void * s, char * pData, int& nLen, int maxLen,
 
 						if (iter->nLessBufLen < 1)
 						{
-							delete [] iter->pData;
-							delete iter;
+							tmpDataStack.push(iter);
 							lmap[sSock].pop();
 							continue;	//继续看是否有下一条
 						}
@@ -279,92 +314,57 @@ int CWebSocketData::ReadDelayData(void * s, char * pData, int& nLen, int maxLen,
 							assert(0);
 							//只读到半个
 							iter->nPopLen += sended;
-							return sended;
+							break;
 						}
 					}
-					else
-					{
-						assert(0);
-					}
-					
-// 					if ((iter->nPackageLen - iter->nLessBufLen) - iter->nPopLen <= nDstLen)
-// 					{
-// 						if (iter->dwNeedDelay)
-// 						{
-// 							char sOut[100] = {0};
-// 							sprintf(sOut, ">>> 恢复-Idx:%d, 时间间隔:%d\n", iter->nIdx, (int)iter->dwNeedDelay);
-// 							OutputDebugStringA(sOut);
-// 						}
-// 
-// 						int nsz = (iter->nPackageLen - iter->nLessBufLen) - iter->nPopLen;
-// 						if (nsz < 1)
-// 						{
-// 							assert(sended == 0);
-// 							return -1;
-// 						}
-// 						memcpy(&pDstData[sended], &iter->pData[iter->nPopLen], nsz);
-// 						sended += nsz;
-// 						maxLen -= nsz;
-// 						
-// 						if (iter->nLessBufLen < 1)
-// 						{
-// 							delete [] iter->pData;
-// 							delete iter;
-// 							lmap[sSock].pop();
-// 							continue;	//继续看是否有下一条
-// 						}
-// 						else
-// 						{
-// 							//只读到半个
-// 							iter->nPopLen += sended;
-// 							return sended;
-// 						}
-// 					}
-// 					else
-// 					{
-// 						if (nLen >= 2)
-// 						{
-// 							assert(nDstLen <= iter->nPackageLen - iter->nLessBufLen);
-// 							memcpy(&pDstData[sended], &iter->pData[iter->nPopLen], nDstLen);
-// 							sended += nDstLen;
-// 							iter->nPopLen += nLen;	
-// 							return sended;
-// 						}
-// 
-// 						if (sended > 0)
-// 						{
-// 							return sended;
-// 						}
-// 						char sOut[100] = {0};
-// 						sprintf(sOut, ">>> len太小【%d】，等待下次请求\n", nLen);
-// 						OutputDebugStringA(sOut);
-// 						return -1;
-// 					}	
 				}
 				else
 				{
 					if (sended > 0)
 					{
-						return sended;
+						break;
 					}
 					char sOut[200] = {0};
-					sprintf(sOut, ">>> 时间未到，发生读取，retun 0, --read-len:%d, data(len:%d, waittime:%d)\n", nLen, iter->nPackageLen, iter->dwNeedDelay);
+					sprintf(sOut, ">>> [%x]时间未到，发生读取，retun -1, --real-len:%d,max-len:%d, data(len:%d, waittime:%d)\n", s, nLen, maxLen, iter->nPackageLen, iter->dwNeedDelay);
 					OutputDebugStringA(sOut);
-					WSASetLastError(WSAETIMEDOUT);
-					SetLastError(WSAETIMEDOUT);
-					return -1;
+					break;
 				}
 			}
 			else
 			{
-				if (sended > 0)
-				{
-					return sended;
-				}
+				break;
 			}
 		} while (true);		
+
+		if (sended > 0)
+		{
+			//为了保证顺序
+			int naddsize = 0;
+			char * pInsert = new char[sended];
+			while(tmpDataStack.size())
+			{
+				auto iter = tmpDataStack.top();
+				tmpDataStack.pop();
+				naddsize += iter->nPackageLen;
+				memcpy(&pInsert[sended - naddsize], iter->pData, iter->nPackageLen);
+				delete [] iter->pData;
+				delete iter;
+			}
+			assert(naddsize == sended);
+
+			if(InsertPackage(pData, nLen, maxLen, pInsert, sended, am))
+			{
+				
+			}
+			else
+			{
+				assert(0);
+			}
+
+			delete [] pInsert;
+		}	
 	}
-	return -2;
+	return sended;
 }
 
 int _FindData(LPBYTE pData, int nDataSize, LPBYTE pFind, int nFindSize)
@@ -461,27 +461,6 @@ bool CWebSocketData::OnRecvData( void * s, char * pData, int & nLen, int maxLen,
 		assert(0);
 	}
 
-// 	DataInfo * pDi = new DataInfo;
-// 	{		
-// 		m_cacheCounter[sSock]++;	
-// 		m_cacheMap[sSock].push(pDi);
-// 		pDi->dwPushTime = GetTickCount();
-// 		pDi->nPackageLen = nLen;
-// 		pDi->pData = new char[nLen];
-// 		memcpy(pDi->pData, pData, nLen);
-// 		pDi->dwNeedDelay = dwNeedDelay;
-// 		pDi->nLessBufLen = 0;
-// 		pDi->nPopLen = 0;
-// 		pDi->nIdx = m_cacheCounter[sSock];
-// 
-// 		if (dwNeedDelay)
-// 		{
-// 			char sOut[100] = {0};
-// 			sprintf(sOut, ">>> 暂存-Idx:%d, len:%d, timeDelay:%d\n", pDi->nIdx, pDi->nPackageLen, pDi->dwNeedDelay);
-// 			OutputDebugStringA(sOut);
-// 		}
-// 	}
-
 	DataInfo *& pCurDataInfo = m_curDataInfoMap[sSock];
 	do 
 	{
@@ -504,14 +483,25 @@ bool CWebSocketData::OnRecvData( void * s, char * pData, int & nLen, int maxLen,
 					bool sm = m_bShadowMode;
 					if (m_pWSNotify)
 					{
-						m_pWSNotify->OnWSDataCome((SOCKET)s, pCurDataInfo->pData, pCurDataInfo->nDataOffset, pCurDataInfo->nPackageLen, pCurDataInfo->dwNeedDelay);
+						m_pWSNotify->OnWSDataCome((SOCKET)s, pCurDataInfo->pData, pCurDataInfo->nDataOffset, pCurDataInfo->nPackageLen, pCurDataInfo->dwNeedDelay, pCurDataInfo->nIdx);
 
 						if (pCurDataInfo->dwNeedDelay)
 						{
 							bCrossDel = true;
 						
 							m_cacheMap[sSock].push(pCurDataInfo);
-							RemoveMsg(pData, nLen, &pCurDataInfo->pData[nMemPos], pCurDataInfo->nLessBufLen, pCurDataInfo->nDataPos);
+							if(RemoveMsg(pData, nLen, &pCurDataInfo->pData[nMemPos], pCurDataInfo->nLessBufLen, pCurDataInfo->nDataPos))
+							{
+								char sOut[100] = {0};
+								sprintf(sOut, ">>> 暂存成功----------------------Idx:%d, len:%d, timeDelay:%d\n", pCurDataInfo->nIdx, pCurDataInfo->nPackageLen, pCurDataInfo->dwNeedDelay);
+								OutputDebugStringA(sOut);
+							}
+							else
+							{
+								char sOut[100] = {0};
+								sprintf(sOut, ">>> 暂存失败XXXXXXXXXXXXXXXXXXXXIdx:%d, len:%d, timeDelay:%d\n", pCurDataInfo->nIdx, pCurDataInfo->nPackageLen, pCurDataInfo->dwNeedDelay);
+								OutputDebugStringA(sOut);
+							}
 						}
 
 						//pDi->dwNeedDelay = pCurDataInfo->dwNeedDelay;
@@ -567,12 +557,11 @@ bool CWebSocketData::OnRecvData( void * s, char * pData, int & nLen, int maxLen,
 						//assert(pCurDataInfo->nPackageLen - pCurDataInfo->nLessBufLen == pCurDataInfo->nDataOffset);	//一般nDataOffset为2, 跨包消息头应该为2，否则，要注意去除的逻辑如何处理
 					}
 
-					if (ui_nbytes > pCurDataInfo->nDataOffset)
+					if (ui_nbytes > /*pCurDataInfo->nDataOffset*/0)***********
 					{
 						//这种情况msg id 会随着前一消息给出去，所以在此处进行强行移除
 						RemoveMsg(pData, nLen, 0, ui_nbytes, nLen - ui_nbytes);
-						nLen -= ui_nbytes;
-
+					//	nLen -= ui_nbytes;
 						m_removeMap[sSock] = pCurDataInfo;
 
 						char sOut[100] = {0};
@@ -599,6 +588,7 @@ bool CWebSocketData::OnRecvData( void * s, char * pData, int & nLen, int maxLen,
 		//设置当前数据
 		if (!pCurDataInfo)
 		{
+			m_cacheCounter[sSock]++;
 			assert(m_wsMap[sSock].size() == 0);
 			pCurDataInfo = new DataInfo;
 			pCurDataInfo->nDataOffset = i_ret;
@@ -608,7 +598,7 @@ bool CWebSocketData::OnRecvData( void * s, char * pData, int & nLen, int maxLen,
 			pCurDataInfo->nLessBufLen = ui_data_size;
 			pCurDataInfo->nPackageLen = ui_data_size;
 			pCurDataInfo->pData = new char[ui_data_size];
-			pCurDataInfo->nIdx = 0;
+			pCurDataInfo->nIdx = m_cacheCounter[sSock];
 			pCurDataInfo->nDataPos = pRecvData - pData;
 			assert(ui_data_size);
 			continue;

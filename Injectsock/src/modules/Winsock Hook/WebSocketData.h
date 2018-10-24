@@ -9,7 +9,7 @@ using namespace std;
 class CWSStreamInterface
 {
 public:
-	virtual bool OnWSDataCome(SOCKET s, char*, int noffset, int nDatalen, DWORD & nDelayTime) = 0;
+	virtual bool OnWSDataCome(SOCKET s, char*, int noffset, int nDatalen, DWORD & nDelayTime, int nMsgIdx) = 0;
 };
 
 class CWebSocketData

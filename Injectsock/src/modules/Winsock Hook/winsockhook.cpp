@@ -92,7 +92,7 @@ set<string> g_curWebSockHandleSet;
 //#define _TestMode
 SOCKET g_curFlvSock = 0;
 map<SOCKET, DWORD> g_dwLastFlvTimeMap;
-
+map<SOCKET, FILE *> g_sMonitorMap;
 #ifdef _TestMode
 DWORD g_dwTestTick = 0;
 #endif
@@ -147,7 +147,7 @@ public:
 class CWSNotify : public CWSStreamInterface
 {
 public:
-	virtual bool OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, DWORD & nDelayTime);
+	virtual bool OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, DWORD & nDelayTime, int nMsgIdx);
 };
 
 CFlvNotify g_fn;
@@ -163,12 +163,16 @@ enum AgGameIdDef{
 					//0x2f000200,
 	eBeginGame		= 0x0b000200,		// 821C0002000B0000001C00000000
 	eBeginGame2		= 0x35000200,
+	
 	ePing3S_1		= 0x37000200,		// 每3秒一个
 	ePing3S_2		= 0x37000300,		// 每3秒一个
 	eEndGame		= 0x3A000200,
 	eEndGame1		= 0x19000300,
 	eDispchWiner	= 0x39000200,		//分配输赢
 
+	eUserTalk		= 0x05110600,		//玩家发言
+	eUserTalk2		= 0x07110600,		//固定发言，应该是快捷方式
+	eGameResultOutRoom	= 0x11000200,		// 8223000200110000002300000000	//房间外的开局信息
 	eGameResult		= 0x109a0400,
 	ePay			= 0x36000200,		//买入
 
@@ -189,7 +193,7 @@ DWORD GetDelayTime()
 
 map<SOCKET, map<int ,int>> cntmap;
 char g_curRoomName[10] = {0};
-bool CWSNotify::OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, DWORD & nDelayTime){
+bool CWSNotify::OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, DWORD & nDelayTime, int nMsgIdx){
 	int nCode = *(int*)&pData[noffset];
 	
 	char sText[100] = {0};
@@ -222,7 +226,17 @@ bool CWSNotify::OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, D
 	case eGameResult:
 		{
 			sprintf(sText, ">>> [%x], 游戏出结论[%x]\n", s, nDatalen);
-			//nDelayTime += 0x80000;
+		}
+		break;
+	case eGameResultOutRoom:
+		{
+			char sRoom[5] = {0};
+			memset(sRoom, 0, 5);
+			memcpy(sRoom, &pData[14], 4);
+			char sRound[20]  = {0};
+			memset(sRound, 0, 20);
+			memcpy(sRound, &pData[19], 13);
+			sprintf(sText, ">>> [%x], 游戏出结论[%s]-[%s],庄[%d],闲[%d]\n", s, sRoom, sRound, (int)(pData[33]&0xff),(int)(pData[34]&0xff));
 		}
 		break;
 	case eBeginGame:
@@ -232,6 +246,13 @@ bool CWSNotify::OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, D
 			char sRoundName[20] = {0};
 			memcpy(sRoundName, &pData[14], 14);
 			nDelayTime = GetDelayTime();
+
+			if (g_sMonitorMap.count(s))
+			{
+				char ss[16] = {0};
+				memset(ss, 0x98, 16);
+				fwrite(ss, 1, 16, g_sMonitorMap[s]);
+			}
 			sprintf(sText, ">>> [%x], 已开局[%s]------------------------------------延时[%d]\n", s, sRoundName, nDelayTime);	
 		}
 		break;
@@ -239,8 +260,15 @@ bool CWSNotify::OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, D
 		{
 			char sName[10] = {0};
 			memcpy(sName, &pData[14], 4);
-			if (strcmp(g_curRoomName, sName) == 0/* && *(LPWORD)pData[0x13] == 0x1900*/)
+		//	if (strcmp(g_curRoomName, sName) == 0/* && *(LPWORD)pData[0x13] == 0x1900*/)
 			{
+				if (g_sMonitorMap.count(s))
+				{
+					char ss[16] = {0};
+					memset(ss, 0x99, 16);
+					fwrite(ss, 1, 16, g_sMonitorMap[s]);
+				}
+
 				nDelayTime = GetDelayTime();
 				sprintf(sText, ">>> [%x], 开始计时[%s][%x]------------------------------延时[%d]\n", s, sName, nDatalen,nDelayTime);		
 			}
@@ -260,6 +288,13 @@ bool CWSNotify::OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, D
 			//nDelayTime += 0x80000;
 		}
 		break;
+	case eUserTalk:
+	case eUserTalk2:
+		{
+			sprintf(sText, ">>> [%x], 玩家发言--------size:%d\n", s, nDatalen);
+			nDelayTime += GetDelayTime();
+		}
+		break;
 	case eEndGame1:
 		{
 			sprintf(sText, ">>> [%x], 出结论1-------size:%d\n", s, nDatalen);	
@@ -269,11 +304,15 @@ bool CWSNotify::OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, D
 	case ePing3S_1:
 		{
 			sprintf(sText, ">>> [%x], PING--1[%x]\n", s, nDatalen);	
+			//nDelayTime = GetDelayTime();
 		}
+		break;
 	case ePing3S_2:
 		{
 			sprintf(sText, ">>> [%x], PING--2[%x]\n", s, nDatalen);
+			//nDelayTime = GetDelayTime();
 		}
+		break;
 	case eIgnoreMsg1:
 	case eIgnoreMsg2:
 	case eIgnoreMsg3:
@@ -289,7 +328,13 @@ bool CWSNotify::OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, D
 	
 		}
 	}
-	//nDelayTime = 0;
+
+
+	if (eBeginGame2 != nCode)
+	{	
+		nDelayTime = 0;
+	}
+
 //	if (cntmap.size())
 	if (g_roomsock && g_roomsock != s)
 	{
@@ -301,7 +346,7 @@ bool CWSNotify::OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, D
 			cntmap[s][nCode]++;
 			if (strlen(sText) == 0)
 			{
-				//sprintf(sText, ">>> [%x] 0x%x--[%x]--[%d]\n", s, nCode, nDatalen, cntmap[s][nCode]);
+				sprintf(sText, ">>> [%x] 0x%x--[%x]--[%d]\n", s, nCode, nDatalen, cntmap[s][nCode]);
 			}		
 		}
 
@@ -326,8 +371,9 @@ typedef int (WINAPI *PWSASEND)(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount
 typedef int (WINAPI *PWSARECV)(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount, LPDWORD lpNumberOfBytesRecvd, LPDWORD lpFlags, LPWSAOVERLAPPED lpOverlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine);
 typedef SOCKET (WINAPI *PSOCKET) (int af, int type, int protocol);
 typedef int (WINAPI *PCLOSESOCKET) (SOCKET s);
-
-
+typedef int (WSAAPI *PSETSOCKOPT)(__in SOCKET s,__in int level,__in int optname,const char FAR * optval,__in int optlen);
+typedef int (WSAAPI *PIOCTRLSOCKET)(__in SOCKET s,__in long cmd,__inout u_long FAR * argp);
+typedef int (WSAAPI *PSELECT)(__in int nfds,__inout_opt fd_set FAR * readfds,__inout_opt fd_set FAR * writefds,__inout_opt fd_set FAR * exceptfds,__in_opt const struct timeval FAR * timeout);
 /*
 typedef int (WINAPI *PSPRINTF) (char *_Dest, const char *_Format, va_list ap);
 typedef time_t (WINAPI *PTIME)(time_t *);
@@ -343,6 +389,15 @@ PSENDTO	OrigSendTo = sendto;
 PWSASEND OrigWSASend;
 PWSARECV OrigWSARecv;
 PGETHOSTBYNAME OrigGethost;
+
+PIOCTRLSOCKET OrigIoctrlsocket = (PIOCTRLSOCKET)
+	GetProcAddress(GetModuleHandle("Ws2_32.dll"), "ioctlsocket");
+
+PSELECT OrigSelect = (PSELECT)
+	GetProcAddress(GetModuleHandle("Ws2_32.dll"), "select");
+
+PSETSOCKOPT OrigSetsockopt = (PSETSOCKOPT)
+	GetProcAddress(GetModuleHandle("Ws2_32.dll"), "setsockopt");
 
 PCONNECT OrigConnect = (PCONNECT)
 	GetProcAddress(GetModuleHandle("Ws2_32.dll"), "connect");
@@ -382,18 +437,64 @@ SOCKET WINAPI MySocket(int af, int type, int protocol) {
 	return s;
 }
 
+int WSAAPI MyIoctrlsocket(__in SOCKET s,__in long cmd,__inout u_long FAR * argp)
+{
+	int ret = OrigIoctrlsocket(s, cmd, argp);
+	char sOut[100] = {0};
+	sprintf(sOut, ">>> ioctrlsocket:0x%x, 0x%x, ret:%d\n", s, cmd, ret);
+	OutputDebugStringA(sOut);
+	return ret;
+}
+
+int WSAAPI MySelect(__in int nfds,__inout_opt fd_set FAR * readfds,__inout_opt fd_set FAR * writefds,__inout_opt fd_set FAR * exceptfds,__in_opt const struct timeval FAR * timeout)
+{
+	int ret = OrigSelect(nfds, readfds, writefds, exceptfds, timeout);
+	char sOut[100] = {0};
+	sprintf(sOut, ">>> select:%d, 0x%x, 0x%x, 0x%x, %d,%d,ret:%d\n", nfds, readfds, writefds, exceptfds, timeout ? timeout->tv_sec : 0, timeout ? timeout->tv_usec : 0, ret);
+	OutputDebugStringA(sOut);
+	return ret;
+}
+
+int WSAAPI MySetsockopt(__in SOCKET s,__in int level,__in int optname,const char FAR * optval,__in int optlen)
+{
+	int ret = OrigSetsockopt(s, level, optname, optval, optlen);
+	char sOut[100] = {0};
+	sprintf(sOut, ">>> setsocketopt:0x%x, %d, %d, ret:%d\n", s, level, optname, ret);
+	OutputDebugStringA(sOut);
+	return ret;
+}
+
 
 int WINAPI MyClosesocket (SOCKET s) {
 	char sOut[100] = {0};
 	sprintf(sOut, ">>> ----------- sock-close:0x%x\n", s);
 	OutputDebugStringA(sOut);
-
 	assert(s != g_roomsock);
+	if (s == g_roomsock)
+	{
+		MessageBeep(0);
+		g_roomsock = 0;
+		//SetLastError(0x9999);
+	}
+
+	string sSock;
+	g_wsd.GetAddressBySocket(s, sSock);
 
 	int nret = OrigClosesocket(s);
 	if (g_timerMap.count(s))
 	{
 		g_timerMap.erase(s);
+	}
+
+	if (g_sMonitorMap.count(s))
+	{
+		fclose(g_sMonitorMap[s]);
+		g_sMonitorMap.erase(s);
+	}
+
+	if (g_curWebSockHandleSet.count(sSock))
+	{
+		g_curWebSockHandleSet.erase(sSock);
 	}
 
 	if (g_curFlvSock == s)
@@ -610,33 +711,9 @@ int WINAPI __stdcall FakeRecv(SOCKET s, const char* buf, int len, int flags)
 		string sSock;
 		g_wsd.GetAddressBySocket(s, sSock);
 		int am;	//CWebSocketData::AlignMode 
+
 		if(g_wsd.OnRecvData((void*)s, (char*)buf, RecvedBytes, len, am))
 		{	
-// 			assert(len);
-// 			char __buf[0x8000] = {0};
-// 			int nRet = g_wsd.ReadDelayData((void*)s, (char*)__buf, len);
-// 			if (nRet >= 0)
-// 			{
-// 				assert(memcmp((void*)&buf[0], __buf, nRet) == 0);
-// 				
-// 				memcpy((void*)&buf[0], __buf, nRet);
-// 				char sBuf[120] = {0};
-// 				sprintf(sBuf, ">>> fake ret2:0x%x,  src ret:0x%x, want:0x%x\n", nRet, RecvedBytes, len);
-// 				OutputDebugStringA(sBuf);
-// 				return nRet;
-// 			}
-// 
-// 
-// 			char sBuf[120] = {0};
-// 			sprintf(sBuf, ">>> [%x]fake 屏蔽消息 size: %d\n", s, RecvedBytes);
-// 			OutputDebugStringA(sBuf);
-// 			//if (g_curWebSockHandleSet.count(sSock))
-// 			{
-// 				memset((void*)&buf[0], 0, RecvedBytes);
-// 				WSASetLastError(WSAETIMEDOUT);
-// 				SetLastError(WSAETIMEDOUT);
-// 				return -1;	
-// 			}
 		}
 
 		if (am != 0)
@@ -651,178 +728,65 @@ int WINAPI __stdcall FakeRecv(SOCKET s, const char* buf, int len, int flags)
 //===========================RECV===========================
 int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 {	
+	if(flags == 2)
+	{
+		int retTest = OrigRecv(s, buf, len, flags);
+		char stext[80] = {0};
+		sprintf(stext, ">>> [0x%x] 测试是否有数据: ret =%d, inputLen=%d\n",s, retTest, len);
+		OutputDebugStringA(stext);
+		//测试是否有新数据到来
+		return retTest;
+	}
+	assert(flags == 0);
 	int RecvedBytes = FakeRecv(s, buf, len, flags);
 
-// 	if (s == g_roomsock)
+
+	if(0)
+	{
+		
+		if (RecvedBytes > 0)
+		{
+			char sFile[100] = {0};
+			sprintf(sFile, "d:\\data\\changed\\s_%x.dat", s);
+			FILE * fp = fopen(sFile, "ab");
+			fwrite(&buf[0], 1, RecvedBytes, fp);
+			fclose(fp);
+		}
+		else
+		{
+			if (1 || RecvedBytes < 0)
+			{
+	// 			char ss[16] = {0};
+	// 			memset(ss, 0xff, 16);
+	// 			fwrite(ss, 1, 16, fp);
+				char stext[80] = {0};
+				sprintf(stext, ">>> [0x%x] ret %d\n",s, RecvedBytes);
+				OutputDebugStringA(stext);
+			}
+			else
+			{
+	// 			char ss[16] = {0};
+	// 			memset(ss, 0x0, 16);
+	// 			fwrite(ss, 1, 16, fp);
+				char stext[80] = {0};
+				sprintf(stext, ">>> [0x%x] ret 0\n",s);
+				OutputDebugStringA(stext);
+			}
+		}
+
+		
+	}
+
+
+// 	if (g_sMonitorMap.count(s) && RecvedBytes > 0)
 // 	{
-// 		return -1;
+// 		fwrite(buf, 1, RecvedBytes, g_sMonitorMap[s]);
+// 		char sline[16] = {0};
+// 		memset(sline, 0x88, 16);
+// 		fwrite(sline, 1, 16, g_sMonitorMap[s]);
 // 	}
-
-// 	char soutput[150] = {0};
-// 	sprintf(soutput, ">>> [%x]fakeRecv ret: 0x%x want:0x%x", s, RecvedBytes, len);
-// 	OutputDebugStringA(soutput);
-
-// 	BOOL bDelayOK = FALSE;
-// 
-// 	if (!g_timerMap.count(s))
-// 	{
-// 		if (memcmp(buf, sFlvSign, 13) == 0 || (memcmp(buf, "HTTP/", 5) == 0) && strstr(buf, "Content-Type: video/x-flv") != NULL)
-// 		{
-// 			OutputDebugStringA(">>> get flv flag~~~~~~~~~");
-// 			g_timerMap[s] = 0;
-// 			g_nLessRecvLen = 0;
-// 		}	
-// 	}
-// 
-// 	if (g_timerMap.count(s))
-// 	{	
-// 		char * _strBuf = (char*)buf;
-// 		int nRecvBytes = RecvedBytes;
-// 		int _noffset = 0;
-// 		do 
-// 		{
-// 			if (g_timerMap[s] >= 20 * 1000)
-// 			{
-// 				return RecvedBytes;
-// 			}
-// 			_strBuf += _noffset;
-// 			_noffset = 0;
-// 			if (_strBuf[8] == 0 && _strBuf[9] == 0 && _strBuf[10] == 0)
-// 			{
-// 				unsigned int nDataLen = 0;
-// 				nDataLen |= ((((unsigned int)_strBuf[1]) << 16) & 0xFF0000);
-// 				nDataLen |= ((((unsigned int)_strBuf[2]) << 8) & 0xFF00);
-// 				nDataLen |= (unsigned char)_strBuf[3];
-// 				g_nLastPackageLen = nDataLen;
-// 
-// 
-// 				if (_strBuf[0] == 0x09)
-// 				{//video
-// 					
-// 					ProcVideoBuf(s, _strBuf);
-// 					bDelayOK = TRUE;
-// 				}	
-// 			
-// 				if (g_nLastPackageLen > nRecvBytes + g_nLessRecvLen)
-// 				{
-// 					g_nLessRecvLen = nDataLen - nRecvBytes + 11;
-// 				}
-// 				else
-// 				{
-// 					nRecvBytes -= (nDataLen + 11);
-// 					_noffset += (nDataLen + 11);
-// 					_noffset += 4;
-// 					g_nLessRecvLen = 0;
-// 					continue;
-// 				}
-// 			}
-// 			else
-// 			{
-// 				if (g_nLessRecvLen > 0)
-// 				{
-// 					if (g_nLessRecvLen > nRecvBytes)
-// 					{
-// 						g_nLessRecvLen -= nRecvBytes ;
-// 						break;
-// 					}
-// 					else
-// 					{
-// 						nRecvBytes -= (g_nLessRecvLen + 11);
-// 						_noffset += (g_nLessRecvLen + 11);
-// 
-// 						if (ntohl(*(int*)&_strBuf[_noffset]) != g_nLastPackageLen + 11)	//长度校验
-// 						{
-// 							MessageBox(0, "数据长度校验错误", "", 0);
-// 							break;
-// 						}	
-// 						_noffset += 4;
-// 						g_nLessRecvLen = 0;
-// 						continue;
-// 					}
-// 				}
-// 				else
-// 				{
-// 					break;
-// 				}
-// 			}
-// 
-// 			if(g_nLessRecvLen > 0)
-// 			{
-// 				break;
-// 			}
-// 		} while (TRUE);
-// 	}
-
-
-
-// 	if (!bDelayOK)
-// 	{
-// 		bool bVideoMsg = len >= 8 && (GetRtmpPacketType((unsigned char*)buf) == RtmpPacket::Video);
-// 		if (bVideoMsg && !bDelayOK)
-// 		{
-// 			if (!g_timerMap.count(s))
-// 			{
-// 				g_timerMap[s] = 0;
-// 			}
-// 
-// 			if (g_timerMap[s] >= 20 * 1000)
-// 			{
-// 				return RecvedBytes;
-// 			}
-// 
-// 			int ntime = (buf[4] << 16) | (buf[5] << 8) | buf[6];
-// 			ntime += g_nSleepStep;
-// 			Sleep(g_nSleepStep);
-// 			g_timerMap[s] += g_nSleepStep;
-// 
-// 
-// 			((char*)buf)[4] = (char)((ntime >> 16) & 0xff);
-// 			((char*)buf)[5] = (char)((ntime >> 8) & 0xff);
-// 			((char*)buf)[6] = (char)(ntime & 0xff);
-// 		}
-// 		else
-// 		{
-// 			MsgType mt = GetMsgType(s, (char*)buf, RecvedBytes);
-// 			switch(mt)
-// 			{
-// 			case eResult:
-// 				{
-// 					if (g_timerMap.size())
-// 					{
-// 						char * pdata = new char[RecvedBytes];
-// 						memcpy(pdata, buf, RecvedBytes);
-// 						g_endMap[s] = make_pair(pdata, RecvedBytes);
-// 						g_dwEndTime = GetTickCount();
-// 						g_dwEndDelay = g_timerMap.begin()->second;
-// 						memset((void*)&buf[0], 0, len);
-// 						return 6;
-// 					}
-// 					return RecvedBytes;
-// 				}
-// 				break;
-// 			case eJionRoom:
-// 				{
-// 
-// 				}
-// 				break;
-// 			}
-// 
-// 
-// 			bool bJson = ((buf[0] & 0xc0) >> 6) == 2 && buf[4] == '{';
-// 			if (bJson)
-// 			{
-// 				char soutput[150] = {0};
-// 				strcat(soutput, ">>> ");
-// 				memcpy(&soutput[4], &buf[4], RecvedBytes - 4 > 140 ? 140 : RecvedBytes - 4);
-// 				strcat(soutput, "\n");
-// 				OutputDebugStringA(soutput);
-// 			}
-// 		}
-	//}
-
 
 	return RecvedBytes;
-
 }
 
 //===========================CONNECT===========================
@@ -834,6 +798,13 @@ int WINAPI __stdcall MyConnect(SOCKET s, const struct sockaddr *address, int nam
 	char stext[80] = {0};
 	sprintf(stext, ">>> [0x%x] connect: %s:%d\n",s, inet_ntoa(sin.sin_addr), ntohs(sin.sin_port));
 	OutputDebugStringA(stext);
+
+	if (ntohs(sin.sin_port) == 3431)
+	{
+		char sFile[128] = {0};
+		sprintf(sFile, "d:\\data\\ag\\joinroom\\%s.dat", inet_ntoa(sin.sin_addr));
+		g_sMonitorMap[s] = fopen(sFile, "ab");
+	}
 
 	int errors = OrigConnect(s, address, namelen);
 	if(errors == SOCKET_ERROR) return errors;
@@ -1091,7 +1062,19 @@ bool WINAPI EnableHook(BOOL bHook)
 		if (Mhook_SetHook((PVOID*)&OrigConnect, MyConnect)) {		
 			n++;
 		}
-		
+
+		if (Mhook_SetHook((PVOID*)&OrigIoctrlsocket, MyIoctrlsocket)) {		
+			n++;
+		}
+
+		if (Mhook_SetHook((PVOID*)&OrigSelect, MySelect)) {		
+			n++;
+		}
+
+		if (Mhook_SetHook((PVOID*)&OrigSetsockopt, MySetsockopt)) {		
+			n++;
+		}	
+
 		if (n == 3)
 		{
 			OutputDebugStringA(">>> EnableHook(1) ret true");
