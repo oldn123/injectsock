@@ -741,7 +741,7 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 	int RecvedBytes = FakeRecv(s, buf, len, flags);
 
 
-	if(0)
+//	if(0)
 	{
 		
 		if (RecvedBytes > 0)
@@ -754,27 +754,10 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 		}
 		else
 		{
-			if (1 || RecvedBytes < 0)
-			{
-	// 			char ss[16] = {0};
-	// 			memset(ss, 0xff, 16);
-	// 			fwrite(ss, 1, 16, fp);
-				char stext[80] = {0};
-				sprintf(stext, ">>> [0x%x] ret %d\n",s, RecvedBytes);
-				OutputDebugStringA(stext);
-			}
-			else
-			{
-	// 			char ss[16] = {0};
-	// 			memset(ss, 0x0, 16);
-	// 			fwrite(ss, 1, 16, fp);
-				char stext[80] = {0};
-				sprintf(stext, ">>> [0x%x] ret 0\n",s);
-				OutputDebugStringA(stext);
-			}
-		}
-
-		
+			char stext[80] = {0};
+			sprintf(stext, ">>> [0x%x] ret %d\n",s, RecvedBytes);
+			OutputDebugStringA(stext);
+		}	
 	}
 
 
