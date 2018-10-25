@@ -123,7 +123,7 @@ CWebSocketData::DataInfo * CWebSocketData::FixRemoveMsg( void * s, char * pData,
 			sprintf(sOut, ">>> 强行恢复%d个字节-成功\n", pdi->nPackageLen - pdi->nLessBufLen);
 			OutputDebugStringA(sOut);
 
-			pdi->nLessBufLen = pdi->nPackageLen; //修复值
+			pdi->nLessBufLen = pdi->nPackageLen; 这里貌似有问题，回去再看吧//修复值
 
 			m_removeMap.erase(sSock);
 			return pdi;
@@ -557,7 +557,7 @@ bool CWebSocketData::OnRecvData( void * s, char * pData, int & nLen, int maxLen,
 						//assert(pCurDataInfo->nPackageLen - pCurDataInfo->nLessBufLen == pCurDataInfo->nDataOffset);	//一般nDataOffset为2, 跨包消息头应该为2，否则，要注意去除的逻辑如何处理
 					}
 
-					if (ui_nbytes > /*pCurDataInfo->nDataOffset*/0)***********
+					if (ui_nbytes > /*pCurDataInfo->nDataOffset*/0)
 					{
 						//这种情况msg id 会随着前一消息给出去，所以在此处进行强行移除
 						RemoveMsg(pData, nLen, 0, ui_nbytes, nLen - ui_nbytes);
