@@ -154,19 +154,19 @@ DWORD DoInject()
 			hWndGame = NULL;
 		}
 
-		//hWndGame = FindWindow(NULL, "维加斯 - Google Chrome");
+		hWndGame = FindWindow(NULL, "皇家娱乐在线 - Google Chrome");
 		if (!hWndGame)
 		{
 			hWndGame = FindWindow("Chrome_WidgetWin_1", NULL);
 		}
 		if(!hWndGame)
 		{
-			hWndGame = FindWindow(NULL, "维加斯 - 360安全浏览器 8.0");
+			hWndGame = FindWindow(NULL, "皇家娱乐在线 - 360安全浏览器 8.0");
 			//	pWnd = FindWindow("360se6_Frame", NULL);
 		}
 		if(!hWndGame)
 		{
-			hWndGame = FindWindow(NULL, "维加斯 - 360安全浏览器 8.1");
+			hWndGame = FindWindow(NULL, "皇家娱乐在线 - 360安全浏览器 8.1");
 			//	pWnd = FindWindow("360se6_Frame", NULL);
 		}
 
@@ -180,8 +180,11 @@ DWORD DoInject()
 				GetModuleFileName(NULL, strFile, MAX_PATH);
 				CString sFile = strFile;
 				CString sName = sFile.Right(sFile.GetLength() - sFile.ReverseFind('\\'));
+#ifdef _DEBUG
+				sFile.Replace((LPCTSTR)sName, "\\eikasia.dll");
+#else
 				sFile.Replace((LPCTSTR)sName, "\\eikn.dll");
-
+#endif
 				if(InjectDll(dwId, sFile, LoadLib, ThreadHijacking))
 				{
 					break;
