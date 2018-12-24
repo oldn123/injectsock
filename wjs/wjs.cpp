@@ -111,7 +111,7 @@ BOOL CwjsApp::RemoteEject()
 }
 
 //#define GemeTitle "维加斯"
-#define GemeTitle "Asia Game VIP"
+#define GemeTitle "皇家娱乐在线"
 
 DWORD CwjsApp::DoInject()
 {

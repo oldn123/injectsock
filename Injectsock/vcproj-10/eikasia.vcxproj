@@ -192,6 +192,7 @@
     <ClCompile Include="..\src\modules\md5sum\md5.cpp" />
     <ClCompile Include="..\src\modules\md5sum\md5wrapper.cpp" />
     <ClCompile Include="..\src\modules\Winsock Hook\FlvData.cpp" />
+    <ClCompile Include="..\src\modules\Winsock Hook\NetDataPrivider.cpp" />
     <ClCompile Include="..\src\modules\Winsock Hook\WebSocketData.cpp" />
     <ClCompile Include="..\src\modules\Winsock Hook\winsockhook.cpp">
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">CompileAsCpp</CompileAs>
@@ -230,6 +231,7 @@
     <ClInclude Include="..\src\modules\md5sum\md5wrapper.h" />
     <ClInclude Include="..\src\eikasia.h" />
     <ClInclude Include="..\src\modules\Winsock Hook\FlvData.h" />
+    <ClInclude Include="..\src\modules\Winsock Hook\NetDataPrivider.h" />
     <ClInclude Include="..\src\modules\Winsock Hook\WebSocketData.h" />
     <ClInclude Include="..\src\userinfo.h" />
     <ClInclude Include="resource.h" />
