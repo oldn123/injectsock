@@ -101,9 +101,20 @@ DWORD g_dwTestTick = 0;
 class CFlvNotify : public CFlvStreamInterface
 {
 public:
+	CFlvNotify(){
+		m_baseTime = 0;
+	}
+	int m_baseTime;
 	virtual bool OnVideoHeaderCome(SOCKET s, unsigned int & nTimeStamp, int nDatalen){	
 		g_curFlvSock = s;
-		if (!g_curWebSockHandleSet.size())
+
+		if (!m_baseTime)
+		{
+			m_baseTime = nTimeStamp;
+		}
+		nTimeStamp -= m_baseTime;
+
+		if (0 && !g_curWebSockHandleSet.size())
 		{
 			return false;
 		}
@@ -125,7 +136,7 @@ public:
 
 			char sBuf[60] = {0};
 			sprintf(sBuf, ">>> video---%d,%d\n", (int)nTimeStamp, g_timerMap[s]);
-		//	OutputDebugStringA(sBuf);
+			OutputDebugStringA(sBuf);
 
 // 			Sleep(10);
 // 			g_timerMap[s] += ntime;
@@ -698,7 +709,7 @@ int WINAPI __stdcall FakeRecv(SOCKET s, const char* buf, int len, int flags)
 	else
 	{
 		char sFile[100] = {0};
-		sprintf(sFile, "d:\\data\\s_%x.dat", s);
+		sprintf(sFile, "d:\\data\\recv\\s_%x.dat", s);
 		FILE * fp = fopen(sFile, "ab");
 		fwrite(&buf[0], 1, RecvedBytes, fp);
 		fclose(fp);
@@ -706,6 +717,7 @@ int WINAPI __stdcall FakeRecv(SOCKET s, const char* buf, int len, int flags)
 
 	if(!g_fd.OnRecvData((void*)s, (char*)buf, RecvedBytes))
 	{
+		return RecvedBytes;
 		//非flv
 		DWORD dwDiff = 0;
 		string sSock;
@@ -741,7 +753,7 @@ int WINAPI __stdcall MyRecv(SOCKET s, const char* buf, int len, int flags)
 	int RecvedBytes = FakeRecv(s, buf, len, flags);
 
 
-//	if(0)
+	if(0)
 	{
 		
 		if (RecvedBytes > 0)
@@ -888,15 +900,7 @@ int InitSvrSocket()
 		Sleep(500);
 	}
 
-// 	OutputDebugStringA(">>> free ok");
-// 	if(FreeLibrary(g_hMod))
-// 	{
-// 		OutputDebugStringA(">>> free ok");
-// 	}
-// 	else
-// 	{
-// 		OutputDebugStringA(">>> free faild");
-// 	}
+	return 1;
 }
 
 

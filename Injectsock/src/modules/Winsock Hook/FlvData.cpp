@@ -4,25 +4,10 @@
 #include <windows.h>
 #include <assert.h>
 
+
 CFlvData::CFlvData(CFlvStreamInterface * p)
 {
 	m_pFlvNotify = p;
-// 	assert(0);
-// 	FILE * fp = fopen("D:\\data\\flv\\948242296_266.dat", "rb");
-// 	char * pbuf = new char[0x8000];
-// 	int ns = fread(pbuf, 1, 0x8000, fp);
-// 	OnRecvData(pbuf, pbuf, ns);
-// 	fclose(fp);
-// 
-// 	 fp = fopen("D:\\data\\flv\\948251265_32768.dat", "rb");
-// 	 ns = fread(pbuf, 1, 0x8000, fp);
-// 	 OnRecvData(pbuf, pbuf, ns);
-// 	 fclose(fp);
-// 
-// 	 fp = fopen("D:\\data\\flv\\948254750_32768.dat", "rb");
-// 	 ns = fread(pbuf, 1, 0x8000, fp);
-// 	 OnRecvData(pbuf, pbuf, ns);
-// 	 fclose(fp);
 }
 
 
@@ -43,8 +28,25 @@ void SaveData(char* pBuf, int nSize)
 }
 
 char gsFlvSign[] = {
-	0x46,0x4c,0x56,0x01,0x05,0x00,0x00,0x00,0x09,0x00,0,0,0
+	0x46,0x4c,0x56,0x01,0x01,0x00,0x00,0x00,0x09
 };
+
+bool IsMatchFlv(char * pSrcData)
+{
+	bool bMatch = true;
+	for (int i = 0; bMatch && i < 9; i++)
+	{
+		if (i != 4)
+		{
+			bMatch = pSrcData[i] == gsFlvSign[i];
+		}
+		else 
+		{
+			bMatch = pSrcData[i] == 0x01 || pSrcData[i] == 0x05;	//01：只视频，05：音频&视频
+		}
+	}
+	return bMatch;
+}
 
 bool CFlvData::FilterFlvBuf(void* s, char * pData, int nLen, int & nOffset)
 {
@@ -58,45 +60,56 @@ bool CFlvData::FilterFlvBuf(void* s, char * pData, int nLen, int & nOffset)
 			return true;
 		}
 
-		if (memcmp(_data, gsFlvSign, 13) == 0)
+		if (IsMatchFlv(_data))
 		{
-			_data += 13;
-			nOffset = _data - pData;
+			_data += 9;
+			nOffset += (_data - pData);
 			pdi->bGetHeader = true; 
-		}			
+			return true;
+		}	
+		else
+		{
+			//此情况发生时，应该是需要处理flv头的拆包情况，目前没有考虑
+			assert(0);
+		}
 	}
 	
 	if ((memcmp(pData, "HTTP/", 5) == 0) && (_data = strstr((char*)pData, "Content-Type: video/x-flv")) != NULL)
 	{
-		OutputDebugStringA(">>> get flv buffer begin~~~~~~~~~");		
 		if (!m_flvMap.count(s))
-		{
+		{	
+			OutputDebugStringA(">>> get flv buffer begin~~~~~~~~~");		
 			pdi = new DataInfo;
+			pdi->bGetHeader = false;
+			pdi->nPackageLen = 0;
+			memset(&pdi->sHeader[0], 0, 11);
+			pdi->sock = s;
+			pdi->dataPrivider.SetDataComeNotify(this, pdi);
+			pdi->dataPrivider.SetNextNeed(4, false);	//请求4个字节的0，前一个flv包的大小，由于是第一个，所以为0
 			m_flvMap[s] = pdi;
 		}
 		else
 		{
-			pdi = m_flvMap[s];
-		}
-		memset(pdi, 0, sizeof(DataInfo));
+			assert(0);
+		}	
 
 		_data = strstr(pData, "\r\n\r\n");
 		if (_data)
 		{
 			_data += 4;
-		
-			if (_data - pData < nLen)
+			nOffset = _data - pData;
+			int ntmplen = nLen - nOffset;
+			if (ntmplen >= 9)
 			{
-				if (memcmp(_data, gsFlvSign, 13) == 0)
-				{
-					_data += 13;
-					nOffset = _data - pData;
-					pdi->bGetHeader = true; 
-				}			
+				return FilterFlvBuf(s, &pData[nOffset], ntmplen, nOffset);
 			}
 			else
 			{
-				nOffset = _data - pData;
+				if (ntmplen != 0)
+				{
+					//这种情况需要处理，flv头被拆包了
+					assert(false);
+				}
 			}
 		}
 	}
@@ -121,7 +134,7 @@ bool CFlvData::OnCloseHandle(void * s)
 	return false;
 }
 
-int CFlvData::DoProcHeader(void * s, char * pHeader)
+int CFlvData::DoProcHeader(void * s, char * pHeader, bool & bChange)
 {
 	if (pHeader[8] == 0 && pHeader[9] == 0 && pHeader[10] == 0)
 	{
@@ -146,7 +159,7 @@ int CFlvData::DoProcHeader(void * s, char * pHeader)
 					((char*)pHeader)[5] = (char)((nTime >> 8) & 0xff);
 					((char*)pHeader)[6] = (char)(nTime & 0xff);
 					((char*)pHeader)[7] = (char)((nTime >> 24) & 0xff);
-
+					bChange = true;
 				}
 			}	
 			else if (pHeader[0] == 0x08)
@@ -157,6 +170,7 @@ int CFlvData::DoProcHeader(void * s, char * pHeader)
 					((char*)pHeader)[5] = (char)((nTime >> 8) & 0xff);
 					((char*)pHeader)[6] = (char)(nTime & 0xff);
 					((char*)pHeader)[7] = (char)((nTime >> 24) & 0xff);
+					bChange = true;
 				}
 			}
 			else if (pHeader[0] == 0x12)
@@ -172,6 +186,36 @@ int CFlvData::DoProcHeader(void * s, char * pHeader)
 	return 0;
 }
 
+
+bool CFlvData::OnDataCome(char* pData, int nLen, void * pUser)
+{
+	DataInfo * pdi = (DataInfo *)pUser;
+	bool bChange = false;
+	if (nLen == 4)
+	{
+		//前一个tag的尺寸
+		int nLastBufLen = ntohl(*(int*)pData);
+		if (nLastBufLen > 0)
+		{
+			assert(nLastBufLen == pdi->nPackageLen+0x0b);
+		}
+		pdi->dataPrivider.SetNextNeed(0x0b, true);
+	}
+	else if (nLen == 0x0b)
+	{
+		//flv tag头
+
+		pdi->nPackageLen = DoProcHeader(pdi->sock, &pData[0], bChange);
+		pdi->dataPrivider.SetNextNeed(pdi->nPackageLen, false);
+	}
+	else
+	{
+		//flv数据部分
+		pdi->dataPrivider.SetNextNeed(0x4, false);
+	}
+	return bChange;
+}
+
 bool CFlvData::OnRecvData(void* s, char * pData, int nLen)
 {
 	int nInitOffset = 0;
@@ -180,142 +224,13 @@ bool CFlvData::OnRecvData(void* s, char * pData, int nLen)
 		return false;
 	}
 
-	//SaveData(pData, nLen);
-
-	DataInfo * pdi = m_flvMap[s];
-	char * _strBuf = pData + nInitOffset;
-	int nRecvBytes = nLen - nInitOffset;
-	if (nRecvBytes == 0)
+	if (m_flvMap.count(s))
 	{
-		return true;
+		DataInfo * pdi = m_flvMap[s];
+		if (pdi)
+		{
+			pdi->dataPrivider.OnRecvData(&pData[nInitOffset], nLen - nInitOffset);
+		}
 	}
-	assert(nRecvBytes > 0);
-	int _noffset = 0;
-
-	if (pdi->nLessHeaderLen)
-	{
-		if (nLen >= pdi->nLessHeaderLen)
-		{
-			memcpy(&pdi->sHeader[11 - pdi->nLessHeaderLen], _strBuf, pdi->nLessHeaderLen);
-
-			pdi->nLastPackageLen = DoProcHeader(s, &pdi->sHeader[0]);
-
-			if (pdi->nLastPackageLen > 0)
-			{
-				nRecvBytes -= pdi->nLessHeaderLen;
-				_strBuf += pdi->nLessHeaderLen;
-
-				pdi->nLessBufLen = pdi->nLastPackageLen;
-				pdi->nLessHeaderLen = 0;
-			}
-			else
-			{
-				assert(false);
-			}
-		}
-		else
-		{
-			memcpy(&pdi->sHeader[11 - pdi->nLessHeaderLen], _strBuf, nLen);
-			pdi->nLessHeaderLen -= nLen;
-		}	
-	}
-
-	if (pdi->nLessEnd)
-	{
-		nRecvBytes -= pdi->nLessEnd;
-		_strBuf += pdi->nLessEnd;
-	}
-
-	do 
-	{
-		if (pdi->nLessHeaderLen)
-		{
-			break;
-		}
-
-		if (pdi->nLessBufLen > 0 && nRecvBytes)
-		{
-			if (pdi->nLessBufLen - nRecvBytes >= 0)
-			{
-				//来的数据还不够，还要继续补充
-				pdi->nLessBufLen -= nRecvBytes;
-			}
-			else
-			{
-				//够用了
-				if (pdi->nLessEnd == 0)
-				{
-					nRecvBytes -= (pdi->nLessBufLen + 4);	
-				
-					if(nRecvBytes < 0)
-					{
-						pdi->nLessEnd = -nRecvBytes;
-						nRecvBytes = 0;
-					}
-					else
-					{
-						_strBuf = (char*)&_strBuf[pdi->nLessBufLen];	
-						int nLastBufLen = ntohl(*(int*)_strBuf);	//用于验证前一个buf的尺寸
-						if (pdi->nLastPackageLen+11 != nLastBufLen)
-						{
-							assert(0);		//尺寸校验失败
-						}
-						_strBuf += 4;
-					}			
-				}	
-				pdi->nLessBufLen = 0;
-				assert(nRecvBytes >= 0);
-			}
-		}
-
-		if (pdi->nLessBufLen > 0 || nRecvBytes < 1)
-		{
-			break;
-		}
-		pdi->nLessEnd = 0;
-		if (nRecvBytes >= 11)
-		{//完整头的情况
-			pdi->nLastPackageLen = DoProcHeader(s, &_strBuf[0]);
-			if (pdi->nLastPackageLen > 0)
-			{
-				assert(pdi->nLessBufLen == 0);
-				if (pdi->nLastPackageLen + 11 > nRecvBytes)
-				{
-					pdi->nLessBufLen = pdi->nLastPackageLen + 11 - nRecvBytes;
-					nRecvBytes = 0;
-				}
-				else
-				{
-					nRecvBytes -= (pdi->nLastPackageLen + 11 + 4);
-					if(nRecvBytes < 0)
-					{
-						pdi->nLessEnd = -nRecvBytes;
-						nRecvBytes = 0;
-					}
-					else
-					{
-						_strBuf += (pdi->nLastPackageLen + 11);
-						_strBuf += 4;
-					}			
-					continue;
-				}
-			}
-			else
-			{
-				assert(pdi->nLessBufLen == 0);
-				assert(pdi->nLastPackageLen == 0);
-				break;
-			}
-		}
-		else
-		{
-			OutputDebugStringA("****** header need fix *******\n");
-			pdi->nLessHeaderLen = 11 - nRecvBytes;
-			memcpy(pdi->sHeader, _strBuf, nRecvBytes); 
-			assert(pdi->sHeader[0] == 0x08 || pdi->sHeader[0] == 0x09);
-			nRecvBytes = 0;
-		}		
-	} while (TRUE);
-
 	return true;
 }
