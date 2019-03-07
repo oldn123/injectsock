@@ -330,7 +330,7 @@ bool CWSNotify::OnWSDataCome(SOCKET s, char* pData, int noffset, int nDatalen, D
 	}
 
 
-	if (eBeginGame2 != nCode)
+	//if (eBeginGame2 != nCode)
 	{	
 		nDelayTime = 0;
 	}

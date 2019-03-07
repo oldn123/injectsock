@@ -120,7 +120,7 @@ CWebSocketData::DataInfo * CWebSocketData::FixRemoveMsg( void * s, char * pData,
 		if(InsertPackage(pData, nLen, maxLen, pdi->pData, pdi->nPackageLen - pdi->nLessBufLen, CWebSocketData::eBegin))
 		{
 			char sOut[100] = {0};
-			sprintf(sOut, ">>> 强行恢复%d个字节-成功\n", pdi->nPackageLen - pdi->nLessBufLen);
+			sprintf(sOut, ">>> [0x%x]强行恢复%d个字节-成功\n", s, pdi->nPackageLen - pdi->nLessBufLen);
 			OutputDebugStringA(sOut);
 
 			pdi->nLessBufLen = pdi->nPackageLen; //这里貌似有问题，回去再看吧//修复值
@@ -566,7 +566,7 @@ bool CWebSocketData::OnRecvData( void * s, char * pData, int & nLen, int maxLen,
 						m_removeMap[sSock] = pCurDataInfo;
 
 						char sOut[100] = {0};
-						sprintf(sOut, ">>> 强行移除%d个字节\n", ui_nbytes);
+						sprintf(sOut, ">>> [0x%x]强行移除%d个字节\n", s, ui_nbytes);
 						OutputDebugStringA(sOut);
 					}	
 					else
@@ -576,7 +576,7 @@ bool CWebSocketData::OnRecvData( void * s, char * pData, int & nLen, int maxLen,
 							pData[nLen - ui_nbytes + 1] = 0;
 							m_removeMap[sSock] = pCurDataInfo;
 							char sOut[100] = {0};
-							sprintf(sOut, ">>> 强行变更为0个字节\n");
+							sprintf(sOut, ">>> [0x%x]强行变更为0个字节\n", s);
 							OutputDebugStringA(sOut);
 						}
 						else
