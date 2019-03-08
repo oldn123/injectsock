@@ -102,17 +102,16 @@ class CFlvNotify : public CFlvStreamInterface
 {
 public:
 	CFlvNotify(){
-		m_baseTime = 0;
 	}
-	int m_baseTime;
+	map<SOCKET, int> m_baseTimeMap;
 	virtual bool OnVideoHeaderCome(SOCKET s, unsigned int & nTimeStamp, int nDatalen){	
 		g_curFlvSock = s;
 
-		if (!m_baseTime)
+		if (!m_baseTimeMap.count(s))
 		{
-			m_baseTime = nTimeStamp;
+			m_baseTimeMap[s] = nTimeStamp;
 		}
-		nTimeStamp -= m_baseTime;
+		nTimeStamp -= m_baseTimeMap[s];
 
 		if (0 && !g_curWebSockHandleSet.size())
 		{

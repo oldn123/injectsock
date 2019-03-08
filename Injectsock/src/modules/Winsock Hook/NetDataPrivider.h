@@ -30,6 +30,9 @@ public:
 	void OnRecvData(char* pBuf, int nDataLen);	
 	void SetNextNeed(int, bool bNeedWholePack);
 
+	void InputData(char* pBuf, int nDataLen);	
+	int GetOutputData(char* pBuf, int nDataLen);
+
 protected:
 	IDataCome * m_pDataComeImpl;
 	bool		m_bUseCachePtr;

@@ -3,11 +3,15 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <assert.h>
+//#include "speedhack.hpp"
 
 
 CFlvData::CFlvData(CFlvStreamInterface * p)
 {
 	m_pFlvNotify = p;
+
+// 	Speedhack::Setup();
+// 	Speedhack::SetSpeed(0.5); //slows down to half speed
 }
 
 
@@ -175,6 +179,7 @@ int CFlvData::DoProcHeader(void * s, char * pHeader, bool & bChange)
 			}
 			else if (pHeader[0] == 0x12)
 			{
+				OutputDebugStringA("*****************************************\n");
 			}
 			else
 			{
